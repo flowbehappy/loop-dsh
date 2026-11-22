@@ -13,7 +13,14 @@ const exec=promisify(execFile),runtime=process.env.LOOP_TS_E2E_DSH_BIN,base=proc
 
 // The extended browser journey runs multiple bounded model turns before checking sync.
 const extendedJourney = ['LOOP_TS_E2E_BUSINESS','LOOP_TS_E2E_CHANNEL'].some(key => process.env[key] === '1')
-const probeTimeout = method => method === 'browser' && extendedJourney ? 180000 : 60000
+const liveTopic = process.env.LOOP_TS_E2E_LIVE_TOPIC === '1'
+if (liveTopic && (!runtime || !base || !process.env.LOOP_TEST_MODEL_FILE)) {
+  throw new Error('Live topic acceptance requires the official DSH binary, an isolated Loop Test Hub and a dedicated model key file')
+}
+function probeTimeout(method) {
+  if (method === 'browser' && liveTopic) return 600000
+  return method === 'browser' && extendedJourney ? 180000 : 60000
+}
 
 for(const method of ['browser','access-token'])test('packaged plugin signs in and runs a persisted official DSH session: '+method,{skip:!runtime || method==='access-token' && !base,timeout:probeTimeout(method) + 30000},async t=>{
   assert.ok(isAbsolute(runtime),'supply an explicitly isolated official DSH bin.js')
@@ -86,6 +93,7 @@ export async function apply(ctx){
    await trace("registration");const registered=await api('POST','/api/v1/auth/register',{name:'native_'+randomUUID().slice(0,8),email:'native-'+randomUUID()+'@example.com',password})
    token=registered.accessToken
    if(!registered.user.emailVerified){const mailbox=await api('GET','/internal/e2e/mailbox/latest?kind=verify&email='+encodeURIComponent(registered.user.email));await api('POST','/api/v1/auth/verify-email',{token:mailbox.token})}
+   let topicProvider
    let upstreamCalls=0,upstreamError='',business,channelJourney
    const upstream=createServer(async(req,res)=>{
     try{
@@ -93,6 +101,7 @@ export async function apply(ctx){
      let raw='';for await(const chunk of req)raw+=chunk
      const input=JSON.parse(raw);assert.equal(input.model,'native-test-model');assert.ok(input.messages.length)
      upstreamCalls++
+     if(topicProvider){try{await topicProvider.stream(input,res)}catch(error){if(!res.headersSent)throw error;res.destroy()}return}
      const nl=String.fromCharCode(10),event=value=>'data: '+JSON.stringify(value)+nl+nl
      const call=channelJourney ? channelJourney.next(input) : business?.next(input)
      res.writeHead(200,{'Content-Type':'text/event-stream'})
@@ -187,6 +196,11 @@ export async function apply(ctx){
      result.channelScenarios=channelJourney.scenarios.length
      channelJourney=undefined
    }
+   if(method==="browser" && process.env.LOOP_TS_E2E_LIVE_TOPIC==="1"){
+     const {liveTopicProvider,runLiveTopic}=await import(${JSON.stringify(new URL('./live-topic-cooperation.mjs',import.meta.url).href)})
+     topicProvider=await liveTopicProvider()
+     result.topic=await runLiveTopic({ctx,api,base,workspace,localWorkspace,sessionId:result.session.sessionId,provider:topicProvider,trace,selectedModel:{provider:group.id,model:model.id}})
+   }
    await trace('sync-receipt')
    let uploaded
    const syncTarget=await hostRuntime.sessionSyncTarget(result.session.sessionId)
@@ -254,6 +268,14 @@ export async function apply(ctx){
   assert.doesNotMatch(log,/opening the default browser/u)
   assert.ok(result.session.sessionId)
   if(method==='browser' && process.env.LOOP_TS_E2E_BUSINESS==='1')assert.equal(result.business,true)
+  if(method==='browser' && liveTopic){
+    assert.equal(result.topic?.workerModelTurns,6)
+    const catalog=JSON.parse(await readFile(new URL('../../../docs/testing/super-agent-scenarios.json',import.meta.url),'utf8'))
+    const ids=['live-topic-cooperation','original-song-assignment']
+    const checks=ids.flatMap(id=>Object.keys(catalog.suites.find(suite=>suite.id===id).checks))
+    assert.deepEqual(result.topic.checks.toSorted(),checks.toSorted())
+    t.diagnostic(JSON.stringify(result.topic))
+  }
   if(publicOrigin)assert.deepEqual(result.worksite,{relay:true,launch:true,remoteHost:true,remoteOAuth:true})
   if(base)assert.deepEqual(result.realLoop,{method,account:true,modelCatalog:true,sessionAction:true,modelStream:true,telemetrySync:true,disconnect:true})
   if(method==="browser" && process.env.LOOP_TS_E2E_CHANNEL==="1") {assert.equal(result.channelScenarios,15);t.diagnostic("15 channel history, consent, membership and named-board task scenarios verified")}

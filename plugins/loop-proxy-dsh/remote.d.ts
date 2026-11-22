@@ -419,6 +419,7 @@ export type CollaborationBindValue = {
 }
 
 export type CollaborationDirectoryEntry = {
+  readonly mention?: string
   readonly targetId: string
   readonly targetType: "agent" | "human"
   readonly displayName: string

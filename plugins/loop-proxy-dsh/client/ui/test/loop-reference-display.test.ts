@@ -62,3 +62,14 @@ test('knowledge references display the library name and preserve permission-scop
   assert.equal(loopReferenceDisplayRule.match(invalid + reference, 0, context)?.start, invalid.length)
   assert.equal(loopReferenceDisplayRule.match(reference, 1, context), undefined)
 })
+
+test('directory-provided message mentions remain inert and display the selected name', () => {
+  const ref = serializeCollaborationReference({
+    version: 1, sessionId: 'session-1', targetId: 'mem_worker', targetType: 'agent',
+    stableRef: 'loop-collaboration:agent/mem_worker', displayName: 'A & B', directoryKey: 'dsh-test',
+  }, '[@A & B](/mentions/agent/agt_worker)')
+  assert.match(ref, /messageMention="\[@A &amp; B\]\(\/mentions\/agent\/agt_worker\)"/)
+  const node = loopReferenceDisplayRule.match(ref, 0, context)
+  assert.equal(node?.data.display, '@A & B')
+  assert.equal(node?.data.text, ref)
+})

@@ -70,6 +70,58 @@
       ]
     },
     {
+      "id": "live-topic-cooperation",
+      "level": "real-model-dsh-and-loop-agent-runtimes",
+      "automation": "plugins/loop-proxy-dsh/test/native-dsh-runtime.test.mjs",
+      "fixture": "plugins/loop-proxy-dsh/test/live-topic-cooperation.mjs",
+      "environment": {
+        "LOOP_TS_E2E_LIVE_TOPIC": "1"
+      },
+      "preconditions": "Two independent DSH sessions with the same assistant and two participating Loop Agents in a private channel, a second Human and their guest Agent, plus a nonmember. Supply a dedicated DeepSeek test credential.",
+      "checks": {
+        "topic-mentions": "Both topics target both selected Agent IDs in Loop delivery diagnostics.",
+        "cross-owner": "A second Human accepts a workspace invite, enrolls their own guest Agent and contributes in the topic. Loop rejects enrollment by the other owner. Verify the guest receives the mention and the author uses the peer feedback.",
+        "cross-review": "The editor quotes the author’s draft reference and the author quotes the editor’s review in the revision. Check all authors against persisted member IDs.",
+        "retry-once": "An identical retry of the revised draft leaves exactly one message.",
+        "private-topic": "A nonmember cannot read the private topic.",
+        "parent-isolation": "Topic-only replies do not appear on the parent timeline.",
+        "session-push": "The revised draft arrives as a pushed event in the original DSH session.",
+        "coordinator-summary": "The coordinator summarizes the received final reference in its own session.",
+        "overlapping-topics": "Separate both topics and original sessions even when both rooms have the same participants.",
+        "discussion-only": "Discussions create zero tasks.",
+        "removed-member": "Removing a participant from the channel revokes its read access to the existing topic."
+      }
+    },
+    {
+      "id": "original-song-assignment",
+      "level": "real-model-dsh-and-loop-agent-runtime",
+      "automation": "plugins/loop-proxy-dsh/test/native-dsh-runtime.test.mjs",
+      "fixture": "plugins/loop-proxy-dsh/test/live-topic-cooperation.mjs",
+      "environment": {
+        "LOOP_TS_E2E_LIVE_TOPIC": "1"
+      },
+      "prompt": "你让 @wan_imac_ds_001 写首小曲看看。",
+      "checks": {
+        "default-task": "One new task on the bound board with the selected musician as assignee.",
+        "task-feedback": "The musician returns model-generated music under its own identity. Read it back in the task and observe delivery to the original session only."
+      }
+    },
+    {
+      "id": "original-project-poem",
+      "automation": "plugins/loop-proxy-dsh/test/native-real-loop.test.mjs",
+      "fixture": "plugins/loop-proxy-dsh/test/project-resource-journey.mjs",
+      "loopRegression": "go test ./internal/resource/lookup -run TestSparseDirectoryContinuesAfterEmptyPageAndMidBatchMatch",
+      "prompt": "@wan_imac_ds_002 你给他弄一个新任务吧，写一首诗好了。这个任务你就放在 wannnn 项目里边",
+      "coverage": [
+        "discover project by name with scoped consent",
+        "return IDs and names across catalog pages",
+        "grant ordinary and Super Agent project roles",
+        "assign exactly one project task",
+        "worker writes the linked document and replies to the task",
+        "unlink, remove membership, independently grant and revoke direct access"
+      ]
+    },
+    {
       "id": "gui",
       "level": "actual-web-and-desktop",
       "steps": [

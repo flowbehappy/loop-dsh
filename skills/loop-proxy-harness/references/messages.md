@@ -26,7 +26,7 @@ channel, the assistant's owner with invite permission can select their assistant
 under Add members → Agents. Inviting another Agent requires management permission
 and authorization to share the channel's content.
 
-Address an Agent by copying its directory `mention` into message content.
+Address an Agent by copying the selected reference’s `messageMention` or the directory’s `mention` into the message. The chip’s `target` identifies the workspace member for collaboration tools.
 On older servers, use `[@Name](/mentions/agent/<agentId>)` with the exact returned
 agentId. Mentions inside code or blockquotes are inert. Directory capability
 flags describe particular tools, not delivery guarantees; check the capability

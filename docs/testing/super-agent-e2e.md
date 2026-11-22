@@ -43,3 +43,16 @@ Web 与 Desktop 各自从实际界面验证登录、模型回复、知识与 Ski
 每轮另存 Loop/plugin SHA、DSH 版本、测试库限额回读、用例 ID、`pass` / `fail` / `skip` / `not-run`、失败原因和日志位置。模型场景按整个分组执行，不能跳过前置步骤只验证最后的回复。界面验收、真实模型、确定性协议测试分别记录。全文检索未就绪时，授权预检成功不等于搜索结果验收成功。
 
 通用个人授权回归：Agent 权限明确拒绝后，插件对消息目标与任务频道定位字段中的 `#slug` 复用精确频道目录，将同一组稳定参数交给授权预检与后续 Human 执行。原有 ID、私聊、回复串和正文不重写；服务端仍负责动作、资源与实时权限校验。
+
+## 两个会话、两个话题与单人派工
+
+在支持本地模型测试入口的隔离 Test Hub 上，正式 DSH 加载插件，调用 DeepSeek 运行两个独立会话。两名 Loop Agent 分别用自己的运行凭据读写同一私有频道里的两个话题，由真实模型完成初稿、互评和修订。第二个测试用户自己添加其客座 Agent，参与者读到同事与客座 Agent 的意见后再修改诗稿。测试端为每次交付附加随机编号，检查 Loop 投递名单、消息作者、同一请求重试后的条数和原会话收到的推送。另测移出频道、非成员读取，以及单人小曲委派的任务和回信。
+
+```sh
+LOOP_TS_E2E_DSH_BIN=/absolute/isolated/node_modules/@deepseek-ai/dsh/lib/bin.js \
+LOOP_TS_E2E_BASE_URL=http://127.0.0.1:PORT LOOP_TS_E2E_INSTALL_PACKAGE=1 \
+LOOP_TS_E2E_LIVE_TOPIC=1 LOOP_TEST_MODEL_FILE=/absolute/path/to/test-key \
+  node --test --test-name-pattern=browser plugins/loop-proxy-dsh/test/native-dsh-runtime.test.mjs
+```
+
+服务提供方为 DeepSeek，默认模型为 `deepseek-v4-flash`，可通过 `LOOP_TEST_MODEL_NAME` 指定模型。凭据文件须只含测试密钥。Loop 账号中只保存临时测试入口的凭据。写诗派工、项目成员授权及知识库撤权由上面的 `native-real-loop.test.mjs` 覆盖。

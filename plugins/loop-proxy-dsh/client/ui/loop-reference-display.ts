@@ -7,7 +7,7 @@ export const loopReferenceDisplayRule: UserTextRule<'loop.reference-display'> = 
   id: 'loop.reference-display',
   order: 20,
   match(text, from) {
-    const references = /<loop-knowledge-ref>[A-Za-z0-9_-]{1,8192}<\/loop-knowledge-ref>|<loop-skill-ref>[A-Za-z0-9_-]{1,21845}<\/loop-skill-ref>|<loop-collaboration type="(?:agent|human)" target="[^"<>]{1,1200}" ref="[^"<>]{1,3072}"(?: directory="[A-Za-z0-9_.:-]{1,200}")?>([^<]{1,1530})<\/loop-collaboration>/gu
+    const references = /<loop-knowledge-ref>[A-Za-z0-9_-]{1,8192}<\/loop-knowledge-ref>|<loop-skill-ref>[A-Za-z0-9_-]{1,21845}<\/loop-skill-ref>|<loop-collaboration type="(?:agent|human)" target="[^"<>]{1,1200}" ref="[^"<>]{1,3072}"(?: directory="[A-Za-z0-9_.:-]{1,200}")?(?: messageMention="[^"<>]{1,3072}")?>([^<]{1,1530})<\/loop-collaboration>/gu
     references.lastIndex = from
     for (let match = references.exec(text); match !== null; match = references.exec(text)) {
       let knowledgeName: string | undefined

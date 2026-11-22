@@ -465,11 +465,10 @@ export class CollaborationSessionRuntime {
         'This collaborator reference belongs to another Session. Select it again in this Session.',
       )
     }
-    const token = serializeCollaborationReference(reference)
     const share = this.store.getSnapshot().shareScope
     if (reference.directoryKey && share.scope === 'task-description' && share.resourceRefs.length === 0) {
-      await this.verifyDirectoryMember(reference, signal)
-      return token
+      const entry = await this.verifyDirectoryMember(reference, signal)
+      return serializeCollaborationReference(reference, entry.mention)
     }
     if (this.prepared !== null || this.pendingRecovery !== null) {
       throw new CollaborationRuntimeError(
@@ -477,6 +476,7 @@ export class CollaborationSessionRuntime {
         'Another Loop collaborator message is still being linked. Wait, retry, or discard that pending intent.',
       )
     }
+    const token = serializeCollaborationReference(reference)
     const builder = this.batchBuilder ?? this.newBatchBuilder()
     if (!builder.targets.some(target => target.targetId === reference.targetId && target.targetType === reference.targetType)) {
       builder.targets.push({
@@ -509,12 +509,14 @@ export class CollaborationSessionRuntime {
     }
   }
 
-  private async verifyDirectoryMember(reference: CollaborationReference, signal: AbortSignal): Promise<void> {
+  private async verifyDirectoryMember(reference: CollaborationReference, signal: AbortSignal) {
     const page = await this.fetchDirectory(reference.targetId, signal, [reference.targetType])
-    if (page.cacheKey !== reference.directoryKey || !page.entries.some(entry => entry.visible &&
-        entry.targetId === reference.targetId && entry.targetType === reference.targetType && entry.stableRef === reference.stableRef)) {
+    const entry = page.entries.find(item => item.visible && item.targetId === reference.targetId &&
+      item.targetType === reference.targetType && item.stableRef === reference.stableRef)
+    if (page.cacheKey !== reference.directoryKey || !entry) {
       throw new CollaborationRuntimeError('loop-collaboration/binding-stale', 'The directory or collaborator changed. Select the collaborator again.')
     }
+    return entry
   }
 
   private async submissionRoute(reference: CollaborationReference, signal: AbortSignal) {

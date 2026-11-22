@@ -2224,9 +2224,10 @@ window.__ModuleLoader__.load({
     function xmlAttribute(value) {
       return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
     }
-    function serializeCollaborationReference(reference) {
+    function serializeCollaborationReference(reference, mention) {
       const directory = reference.directoryKey ? ` directory="${xmlAttribute(reference.directoryKey)}"` : "";
-      return `<loop-collaboration type="${reference.targetType}" target="${xmlAttribute(reference.targetId)}" ref="${xmlAttribute(reference.stableRef)}"${directory}>${xmlAttribute(reference.displayName)}</loop-collaboration>`;
+      const messageMention = mention && mention.length <= 512 ? ` messageMention="${xmlAttribute(mention)}"` : "";
+      return `<loop-collaboration type="${reference.targetType}" target="${xmlAttribute(reference.targetId)}" ref="${xmlAttribute(reference.stableRef)}"${directory}${messageMention}>${xmlAttribute(reference.displayName)}</loop-collaboration>`;
     }
     async function collaborationDigest(value) {
       const digest = await globalThis.crypto.subtle.digest(
@@ -2483,11 +2484,10 @@ window.__ModuleLoader__.load({
             "This collaborator reference belongs to another Session. Select it again in this Session."
           );
         }
-        const token = serializeCollaborationReference(reference);
         const share = this.store.getSnapshot().shareScope;
         if (reference.directoryKey && share.scope === "task-description" && share.resourceRefs.length === 0) {
-          await this.verifyDirectoryMember(reference, signal);
-          return token;
+          const entry = await this.verifyDirectoryMember(reference, signal);
+          return serializeCollaborationReference(reference, entry.mention);
         }
         if (this.prepared !== null || this.pendingRecovery !== null) {
           throw new CollaborationRuntimeError(
@@ -2495,6 +2495,7 @@ window.__ModuleLoader__.load({
             "Another Loop collaborator message is still being linked. Wait, retry, or discard that pending intent."
           );
         }
+        const token = serializeCollaborationReference(reference);
         const builder = this.batchBuilder ?? this.newBatchBuilder();
         if (!builder.targets.some((target) => target.targetId === reference.targetId && target.targetType === reference.targetType)) {
           builder.targets.push({
@@ -2525,9 +2526,11 @@ window.__ModuleLoader__.load({
       }
       async verifyDirectoryMember(reference, signal) {
         const page = await this.fetchDirectory(reference.targetId, signal, [reference.targetType]);
-        if (page.cacheKey !== reference.directoryKey || !page.entries.some((entry) => entry.visible && entry.targetId === reference.targetId && entry.targetType === reference.targetType && entry.stableRef === reference.stableRef)) {
+        const entry = page.entries.find((item) => item.visible && item.targetId === reference.targetId && item.targetType === reference.targetType && item.stableRef === reference.stableRef);
+        if (page.cacheKey !== reference.directoryKey || !entry) {
           throw new CollaborationRuntimeError("loop-collaboration/binding-stale", "The directory or collaborator changed. Select the collaborator again.");
         }
+        return entry;
       }
       async submissionRoute(reference, signal) {
         if (reference.directoryKey) await this.verifyDirectoryMember(reference, signal);
@@ -3712,7 +3715,7 @@ window.__ModuleLoader__.load({
       id: "loop.reference-display",
       order: 20,
       match(text2, from) {
-        const references = /<loop-knowledge-ref>[A-Za-z0-9_-]{1,8192}<\/loop-knowledge-ref>|<loop-skill-ref>[A-Za-z0-9_-]{1,21845}<\/loop-skill-ref>|<loop-collaboration type="(?:agent|human)" target="[^"<>]{1,1200}" ref="[^"<>]{1,3072}"(?: directory="[A-Za-z0-9_.:-]{1,200}")?>([^<]{1,1530})<\/loop-collaboration>/gu;
+        const references = /<loop-knowledge-ref>[A-Za-z0-9_-]{1,8192}<\/loop-knowledge-ref>|<loop-skill-ref>[A-Za-z0-9_-]{1,21845}<\/loop-skill-ref>|<loop-collaboration type="(?:agent|human)" target="[^"<>]{1,1200}" ref="[^"<>]{1,3072}"(?: directory="[A-Za-z0-9_.:-]{1,200}")?(?: messageMention="[^"<>]{1,3072}")?>([^<]{1,1530})<\/loop-collaboration>/gu;
         references.lastIndex = from;
         for (let match = references.exec(text2); match !== null; match = references.exec(text2)) {
           let knowledgeName;

@@ -822,7 +822,7 @@ export class LoopCollaborationRuntime {
     // A directory chip pins an identity in the accepted user message. It can
     // narrow a requested assignment, never authorize an action on its own.
     const selected = new Map()
-    const chips = /<loop-collaboration type="(agent|human)" target="([A-Za-z0-9_.:-]{1,200})" ref="[^"<>]{1,3072}" directory="([A-Za-z0-9_.:-]{1,200})">[^<]{1,1530}<\/loop-collaboration>/gu
+    const chips = /<loop-collaboration type="(agent|human)" target="([A-Za-z0-9_.:-]{1,200})" ref="[^"<>]{1,3072}" directory="([A-Za-z0-9_.:-]{1,200})"(?: messageMention="[^"<>]{1,3072}")?>[^<]{1,1530}<\/loop-collaboration>/gu
     for (const match of messageText(input.message).matchAll(chips)) {
       selected.set(match[2], {kind: match[1], directoryKey: match[3]})
     }

@@ -225,7 +225,9 @@ for(const failure of ['none','create-response','execute-response','model-respons
       assert.ok(hit, 'read-only ' + kind + ' must be searchable: ' + JSON.stringify(rows.map(row => [row.section,row.name])))
       const picked = source.onPick({session:{sessionId},candidate:hit})
       assert.ok(picked?.insert)
-      assert.match(await source.codec.serialize(picked.insert.ref,signal), /directory="dsh-/)
+      const token = await source.codec.serialize(picked.insert.ref,signal)
+      assert.match(token, /directory="dsh-/)
+      if (kind === 'agent') assert.ok(token.includes('/mentions/agent/'+worker.id+')'))
     }
     const {sync: _sync, ...withoutUpload} = assistant.permissions
     const noUpload = await api('PUT',settingsPath+'/permissions',{revision,permissions:withoutUpload})

@@ -205,7 +205,7 @@ function naturalSelectionFixture(overrides = {}) {
 test("mention identity is checked against the current grant before explicit preparation and dispatch", async () => {
   for (const directory of ["dsh-current", "dsh-replaced"]) {
     const f = naturalSelectionFixture()
-    f.message.content[0].text = `Assign the review to <loop-collaboration type="agent" target="mem_a" ref="agent:mem_a" directory="${directory}">Worker</loop-collaboration>.`
+    f.message.content[0].text = `Assign the review to <loop-collaboration type="agent" target="mem_a" ref="agent:mem_a" directory="${directory}" messageMention="[@Worker](/mentions/agent/agt_worker)">Worker</loop-collaboration>.`
     await f.claim()
     assert.deepEqual(f.calls, [])
     const prepare = () => f.tool("collaboration_prepare").execute({targetIds:["mem_a"]}, f.exec)

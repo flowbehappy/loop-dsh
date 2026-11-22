@@ -78,9 +78,10 @@ function xmlAttribute(value: string): string {
  * Model-visible reference text. It identifies the stable target but grants
  * nothing; activation remains Host/Proxy-owned.
  */
-export function serializeCollaborationReference(reference: CollaborationReference): string {
+export function serializeCollaborationReference(reference: CollaborationReference, mention?: string): string {
   const directory = reference.directoryKey ? ` directory="${xmlAttribute(reference.directoryKey)}"` : ''
-  return `<loop-collaboration type="${reference.targetType}" target="${xmlAttribute(reference.targetId)}" ref="${xmlAttribute(reference.stableRef)}"${directory}>${xmlAttribute(reference.displayName)}</loop-collaboration>`
+  const messageMention = mention && mention.length <= 512 ? ` messageMention="${xmlAttribute(mention)}"` : ''
+  return `<loop-collaboration type="${reference.targetType}" target="${xmlAttribute(reference.targetId)}" ref="${xmlAttribute(reference.stableRef)}"${directory}${messageMention}>${xmlAttribute(reference.displayName)}</loop-collaboration>`
 }
 
 export async function collaborationDigest(value: string): Promise<string> {

@@ -241,6 +241,7 @@ export interface CollaborationBoard {
 }
 
 export interface CollaborationDirectoryEntry {
+  readonly mention?: string
   readonly targetId: string
   readonly targetType: 'agent' | 'human'
   readonly displayName: string
