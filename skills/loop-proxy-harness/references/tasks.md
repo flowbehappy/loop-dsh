@@ -26,6 +26,24 @@ Use the current Task `revision` for edits that require it. A message's
 `messageSeq` is not a Task revision. Describe `task.update` before editing and
 send only the intended fields. Report returned state, not assumed progress.
 
+## Create for a colleague in a named channel
+
+When the user names a destination channel, use `loop_channel_task` with the literal
+display name or #slug, title and exact assignee member ID from the mention or
+directory. For “在 Loop in Loop 频道给王乐峰建任务”, pass `channelName: "Loop in Loop"`.
+The tool searches the workspace directory and creates on that board. A list of
+joined channels or an empty workspace summary cannot rule out a named channel.
+On ambiguity ask which #slug. Keep the destination and assignee on failure.
+Check the create receipt or read the returned Task ID before reporting success.
+On an uncertain write, inspect the named board before any retry.
+
+A channel invitation link is for a signed-in Human. Use the supplied channel name
+alongside it, or ask for the name if only an invite is available. For an explicit
+request to join, use `loop_channel_join` with the exact name or #slug.
+An authorized assistant can add its own Agent ID to a regular public channel
+with `channel.agent-add`. A private channel requires an authorized member to add
+the assistant. Do not change membership merely to locate a channel.
+
 ## Delegate through the session's collaboration tools
 
 Reading this guide exposes new dispatch tools for the current turn. Existing

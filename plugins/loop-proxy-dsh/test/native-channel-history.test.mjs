@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {readNamedChannel} from '../backend/actions.ts'
+import {createNamedChannelTask, joinNamedChannel, readNamedChannel} from '../backend/actions.ts'
 import {LoopError} from '../backend/errors.ts'
 
 const channel = {channelId:'chn_abc', name:'engineering', displayName:'Engineering'}
@@ -65,4 +65,46 @@ test('explicit Human view requests one read grant even when the Agent can read',
   assert.deepEqual(result.delegationArguments,{limit:5,target:'channel:chn_abc'})
   assert.deepEqual(api.calls.map(([action])=>action),['workspace.list','preview'])
   await assert.rejects(readNamedChannel(fixture(),{...request,readAs:'human'},false),/confirmation/)
+})
+
+test('ambiguous channels, invite tokens and uncertain creates never cause another write', async () => {
+  const input = {channelName:channel.displayName,tasks:[{title:'Review',assignee:'member_a'}]}
+  const writes = []
+  const api = {
+    async invoke(action,args) {
+      if (action === 'workspace.list') return {data:{data:{channels:[channel]}}}
+      writes.push([action,args])
+      return {data:{data:{channelRef:'#wrong',tasks:[{taskId:'tsk_copy',assigneeProfile:{memberId:'member_a'}}]}}}
+    },
+  }
+  await assert.rejects(createNamedChannelTask(api,input,true), error=>error.outcomeUnknown && /tsk_copy/.test(error.message))
+  assert.deepEqual(writes,[['task.create',{board:{kind:'channel',scopeId:channel.channelId},tasks:input.tasks}]])
+  const ambiguous = {async invoke(action) {
+    assert.equal(action,'workspace.list')
+    return {data:{data:{channels:[channel,{...channel,name:'another'}]}}}
+  }}
+  await assert.rejects(createNamedChannelTask(ambiguous,input,true),/Several channels/)
+  await assert.rejects(joinNamedChannel({},'/w/example/channel-invites/secret',()=>assert.fail()),/Human channel invitation/)
+})
+
+test('named task delegation preserves board and assignee and requires an exact write grant',async () => {
+  const tasks = [{title:'Review',assignee:'member_a'}]
+  const policy = {...preview,action:'task.create',write:true}
+  const api = {
+    async invoke(action) {
+      if (action === 'workspace.list') return {data:{data:{channels:[channel]}}}
+      throw denied
+    },
+    async delegationPreview(action,args) {
+      assert.equal(action,'task.create')
+      assert.deepEqual(args.board,{kind:'channel',scopeId:channel.channelId})
+      assert.deepEqual(args.tasks,tasks)
+      assert.ok(args.requestId)
+      return policy
+    },
+  }
+  const input = {channelName:channel.name,tasks}
+  assert.equal((await createNamedChannelTask(api,input,true)).channelLabel,'#engineering')
+  policy.workspaceWide = true
+  await assert.rejects(createNamedChannelTask(api,input,true),/exact write authorization/)
 })

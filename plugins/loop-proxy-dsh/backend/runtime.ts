@@ -4,7 +4,7 @@ import type {CollaborationNamespace} from "./collaboration-store.ts"
 import {WorksiteClient,validateWorksite} from "./worksite.ts"
 import {HostIdentity} from "./host-identity.ts"
 import {CatalogWatch} from "./catalog-watch.ts"
-import {SyncControl} from "./sync-control.ts"
+import {hostSyncPrincipal, SyncControl} from "./sync-control.ts"
 import type {SyncOptions} from "./sync-control.ts"
 import {DisconnectService} from "./disconnect.ts"
 import {PageService} from "./pages.ts"
@@ -16,7 +16,7 @@ import {randomUUID,randomBytes,createHash} from "node:crypto"
 import {HostCredentialStore, serviceURL} from "./credentials.ts"
 import type {CredentialProvider, Credential} from "./credentials.ts"
 import {TokenManager, LoopHTTP} from "./http.ts"
-import {ActionClient, readNamedChannel, requestHumanDM, shareDocumentLink} from "./actions.ts"
+import {ActionClient, createNamedChannelTask, joinNamedChannel, readNamedChannel, requestHumanDM, shareDocumentLink} from "./actions.ts"
 import {beginHostLogin} from "./oauth.ts"
 import type {HostLogin} from "./oauth.ts"
 import {LoopError, requireActive} from "./errors.ts"
@@ -153,12 +153,12 @@ export class LoopBackend {
     this.generations.set(context.workspaceId, credential.generation)
     return await new TokenManager(store, credential, {fetch: this.options.fetch}).credential(signal)
   }
-  private action<T>(context: ActionContext, signal: AbortSignal | undefined, operation: (client: ActionClient, signal: AbortSignal) => Promise<T>, mutation = false): Promise<T> {
+  private action<T>(context: ActionContext, signal: AbortSignal | undefined, operation: (client: ActionClient, signal: AbortSignal, tokens: TokenManager) => Promise<T>, mutation = false): Promise<T> {
     const combined = this.active(signal)
     return this.track(async () => {
       const credential = await this.credential(context, combined)
       const tokens = new TokenManager(this.store(context.workspaceId), credential, {fetch: this.options.fetch})
-      const result = await operation(new ActionClient(new LoopHTTP(tokens, credential.resource, this.options.fetch)), combined)
+      const result = await operation(new ActionClient(new LoopHTTP(tokens, credential.resource, this.options.fetch)), combined, tokens)
       requireActive(combined)
       const current = await this.store(context.workspaceId).modify(async current => current)
       if (current?.generation !== credential.generation) throw new LoopError("loop-host/needs-auth", "Loop connection changed before the result arrived", 0, mutation)
@@ -170,6 +170,15 @@ export class LoopBackend {
   }
   delegationPreview(context: ActionContext, name: string, args: Record<string,unknown> | undefined, signal?: AbortSignal) {
     return this.action(context, signal, (client, combined) => client.delegationPreview(name, args, combined))
+  }
+  joinChannel(context: ActionContext, name: unknown, signal?: AbortSignal) {
+    return this.action(context, signal, (client, combined, tokens) => joinNamedChannel(client, name, async () => {
+      const {principal} = await hostSyncPrincipal(new HostAPI(tokens, this.options.fetch), combined)
+      return principal.agentId
+    }, combined), true)
+  }
+  namedChannelTask(context: ActionContext, args: Record<string,unknown>, prepare: boolean, signal?: AbortSignal) {
+    return this.action(context,signal,(client,combined)=>createNamedChannelTask(client,args,prepare,combined),true)
   }
   channelHistory(context: ActionContext, args: Record<string,unknown>, prepare: boolean, signal?: AbortSignal, priorDenial?: LoopError) {
     return this.action(context, signal, (client, combined) => readNamedChannel(client,args,prepare,combined,priorDenial))
