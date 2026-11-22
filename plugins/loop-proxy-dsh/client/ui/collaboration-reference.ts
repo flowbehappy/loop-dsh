@@ -7,7 +7,8 @@ export interface CollaborationReference {
   readonly targetType: 'agent' | 'human'
   readonly stableRef: string
   readonly displayName: string
-  readonly bindingRevision: string
+  readonly directoryKey?: string
+  readonly bindingRevision?: string
 }
 
 const REFERENCE_PREFIX = 'loop-collab:v1:'
@@ -46,7 +47,8 @@ export function decodeCollaborationReference(value: string): CollaborationRefere
         (parsed.targetType !== 'agent' && parsed.targetType !== 'human') ||
         typeof parsed.stableRef !== 'string' || parsed.stableRef === '' || parsed.stableRef.length > 512 ||
         typeof parsed.displayName !== 'string' || parsed.displayName.trim() === '' || parsed.displayName.length > 255 ||
-        typeof parsed.bindingRevision !== 'string' || parsed.bindingRevision === '' || parsed.bindingRevision.length > 200) {
+        (parsed.directoryKey !== undefined && (typeof parsed.directoryKey !== 'string' || !ID.test(parsed.directoryKey))) ||
+        (parsed.bindingRevision === undefined ? !parsed.directoryKey : typeof parsed.bindingRevision !== 'string' || !parsed.bindingRevision || parsed.bindingRevision.length > 200)) {
       return null
     }
     return {
@@ -56,7 +58,8 @@ export function decodeCollaborationReference(value: string): CollaborationRefere
       targetType: parsed.targetType,
       stableRef: parsed.stableRef,
       displayName: parsed.displayName,
-      bindingRevision: parsed.bindingRevision,
+      ...(parsed.bindingRevision === undefined ? {} : {bindingRevision: parsed.bindingRevision}),
+      ...(parsed.directoryKey === undefined ? {} : {directoryKey: parsed.directoryKey}),
     }
   } catch {
     return null
@@ -76,7 +79,8 @@ function xmlAttribute(value: string): string {
  * nothing; activation remains Host/Proxy-owned.
  */
 export function serializeCollaborationReference(reference: CollaborationReference): string {
-  return `<loop-collaboration type="${reference.targetType}" target="${xmlAttribute(reference.targetId)}" ref="${xmlAttribute(reference.stableRef)}">${xmlAttribute(reference.displayName)}</loop-collaboration>`
+  const directory = reference.directoryKey ? ` directory="${xmlAttribute(reference.directoryKey)}"` : ''
+  return `<loop-collaboration type="${reference.targetType}" target="${xmlAttribute(reference.targetId)}" ref="${xmlAttribute(reference.stableRef)}"${directory}>${xmlAttribute(reference.displayName)}</loop-collaboration>`
 }
 
 export async function collaborationDigest(value: string): Promise<string> {

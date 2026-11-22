@@ -19,7 +19,7 @@ export class HostAPI {
   private fetcher: typeof fetch
   constructor(tokens: TokenManager, fetcher: typeof fetch = fetch) { this.tokens = tokens; this.fetcher = fetcher }
   async request(area: HostArea, method: "GET" | "POST" | "DELETE" | "PUT", path: string, body?: unknown, signal?: AbortSignal,
-    options: {reauthenticate?: boolean; lossless?: boolean; hostInstallationProof?:string} = {}): Promise<any> {
+    options: {expectedGrantId?:string; reauthenticate?: boolean; lossless?: boolean; hostInstallationProof?:string} = {}): Promise<any> {
     if (!/^\/[a-zA-Z0-9_/?=&.%:+-]*$/u.test(path) || path.startsWith("//")) throw new LoopError("loop-host/invalid-request", "Invalid Host API path")
     let credential = await this.tokens.credential(signal)
     const root = hostRoot(credential, area)
@@ -32,6 +32,9 @@ export class HostAPI {
     }
     for (let attempt = 0; attempt < 2; attempt++) {
       requireActive(signal)
+      if (options.expectedGrantId !== undefined && options.expectedGrantId !== credential.grant_id) {
+        throw new LoopError("loop-host/conflict", "The directory connection changed during lookup")
+      }
       const headers: Record<string,string> = {Authorization: `Bearer ${credential.access_token}`, Accept: "application/json"}
       if (encoded !== undefined) headers["Content-Type"] = "application/json"
       if(options.hostInstallationProof)headers["X-Loop-Host-Installation-Proof"]=options.hostInstallationProof

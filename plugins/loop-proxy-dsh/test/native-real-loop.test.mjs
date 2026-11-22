@@ -190,11 +190,78 @@ for(const failure of ['none','create-response','execute-response','model-respons
     const sync=base+'/api/v1/host-sync/grant'
     assert.equal(await status(models,credential.access_token),200)
     assert.equal(await status(sync,credential.access_token),200)
+    const {binding:directoryChannel} = await facade.prepareProjectSync({
+      workspace:{workspaceId:'directory-test',displayTitle:'Directory test'},agentId:assistant.agentId,localWorkspace:true,
+    })
+    assert.ok(directoryChannel.defaultChannelId)
+    const workspacePath = '/api/v1/workspaces/' + workspace
+    const machine = await api('POST',workspacePath+'/machines',{name:'Mention fixture'})
+    const agentName = 'Mention worker'
+    const worker = await api('POST',workspacePath+'/agents',{
+      name:agentName, description:'Isolated directory fixture',runtime:'codex',machineId:machine.machine.id,
+    })
     const {revision}=await api('PUT',settingsPath+'/permissions',{revision:assistant.revision,permissions:{workspace:['read']}})
     for (const url of [models,sync])assert.ok([401,403].includes(await status(url,credential.access_token)))
+    // The same authenticated, read-only assistant can mention either member
+    // in a fresh Session even though Loop rejects binding its channel.
+    const sessionId = 'read-only-mentions'
+    await assert.rejects(facade.collaborationBind({sessionId, workspaceId:workspace,
+      boardId:directoryChannel.defaultChannelId, coordinatorAgentId:assistant.agentId}), {code:'loop-host/waiting-for-access'})
+    const {CollaborationRuntime} = await import('../client/ui/collaboration-runtime.ts')
+    const mentions = new CollaborationRuntime({
+      remote:{collaborationDirectory:async input => ({ok:true,value:await facade.collaborationDirectory(input)})},
+      sessions:{binding:() => ({session:{getSnapshot:() => ({pendingSubmissions:[]}),subscribe:() => () => {}}})},
+    })
+    t.after(() => mentions.dispose())
+    let source
+    mentions.registerSource({registerSource(value){source=value; return () => {}}}, kind => kind,
+      error => error.code, {delegate:'assign',notify:'mention',needsAccess:'restricted',unavailable:'unavailable'})
+    for (const [kind,query] of [['agent',agentName],['human',registered.user.name]]) {
+      const signal = new AbortController().signal
+      const rows = await source.candidates({sessionId},{query,signal})
+      const hit = rows.find(row => row.section === kind && row.name === query)
+      assert.ok(hit, 'read-only ' + kind + ' must be searchable: ' + JSON.stringify(rows.map(row => [row.section,row.name])))
+      const picked = source.onPick({session:{sessionId},candidate:hit})
+      assert.ok(picked?.insert)
+      assert.match(await source.codec.serialize(picked.insert.ref,signal), /directory="dsh-/)
+    }
     await api('PUT',settingsPath+'/permissions',{revision,permissions:assistant.permissions})
     assert.equal(await status(models,credential.access_token),200)
     assert.equal(await status(sync,credential.access_token),200)
+    const channelId = directoryChannel.defaultChannelId
+    const workerDirectory = await facade.collaborationDirectory({sessionId,query:agentName,kinds:['agent']})
+    const workerTarget = workerDirectory.entries.find(entry => entry.agentId === worker.id)
+    assert.ok(workerTarget)
+    const {missingChannelAgents} = await import('../host-collaboration.mjs')
+    const roster = () => missingChannelAgents(channelId,[workerTarget], async cursor => {
+      const result = await facade.agentAction({workspaceId:'directory-test',sessionId,name:'channel.members',
+        arguments:{channelId,limit:100,...(cursor ? {cursor} : {})}})
+      return result.data?.data
+    }, () => {})
+    assert.deepEqual((await roster()).map(entry => entry.agentId),[worker.id])
+    // Exercise the server's final access decision independently of the roster
+    // preflight so a concurrent membership change cannot create a Task.
+    const route = await facade.collaborationBind({sessionId,workspaceId:workspace,boardId:channelId,coordinatorAgentId:assistant.agentId})
+    const bindingRevision = route.scope.bindingRevision
+    const payloadText = 'Assign the isolated review to Mention worker'
+    const payloadDigest = 'sha256:' + createHash('sha256').update(payloadText).digest('hex')
+    const {intentRef} = await facade.collaborationPrepareIntent({sessionId,bindingRevision,payloadText,payloadDigest,
+      targets:[{targetId:workerTarget.targetId,targetType:'agent',intendedActions:['dispatch']}],
+      shareScope:{scope:'task-description',resourceRefs:[]}})
+    await facade.collaborationBindIntent({sessionId,intentRef,bindingRevision,requestId:'worker-review',payloadDigest,acceptedSerializedText:payloadText})
+    await facade.collaborationActivateIntent({sessionId,intentRef,acceptedEventId:'review-event',acceptedMessageId:'review-message',
+      acceptedSequence:1,acceptedTextDigest:payloadDigest})
+    const dispatchWorker = clientRequestId => facade.collaborationAction({sessionId,intentRef,action:'dispatch',clientRequestId,
+      arguments:{target:{targetId:workerTarget.targetId,kind:'agent'},task:{title:'Isolated review',goal:'Verify channel membership'}}})
+    await assert.rejects(dispatchWorker('before-invitation'),{code:'loop-host/waiting-for-access'})
+    // Simulate the user's explicit choice to invite exactly this Agent through
+    // the same action available to DSH after confirmation.
+    const invitation = await facade.agentAction({workspaceId:'directory-test',sessionId,name:'channel.agent-add',
+      arguments:{channelId,requestId:'confirmed-invitation',agents:[{agentId:worker.id}]}})
+    assert.ok(invitation.data?.data, 'authorized channel invitation must succeed: ' + invitation.error?.code)
+    assert.deepEqual(await roster(),[])
+    const assigned = await dispatchWorker('after-invitation')
+    assert.ok(assigned.receipt.taskId)
     await api('DELETE','/api/v1/me/api-tokens/'+parent.grant.grantId)
     assert.equal(await status(actionsURL,credential.access_token),401)
     assert.equal((await facade.accountStatus({})).state,'needs_auth')

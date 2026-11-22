@@ -141,10 +141,6 @@ function harness(
   remoteOverrides: Partial<LoopHostClient> = {},
   initialPending: CollaborationPendingSubmission[] = [],
   runtimeOptions: {
-    readonly catalogEvents?: (
-      sessionId: string,
-      signal: AbortSignal,
-    ) => AsyncIterable<import('../types.ts').SkillCatalogEventFrame>
     readonly openWorksiteSetup?: (value: NonNullable<CollaborationStatus['scope']>) => void
   } = {},
 ) {
@@ -487,26 +483,17 @@ test('Human references remain inert and serialize without a share prompt', async
   assert.deepEqual(h.notifications, [])
 })
 
-test('warm loads separate Agent and colleague pages and a second menu open performs zero remote reads', async () => {
+test('every menu open reads the current directory even when delivery inspection is offline', async () => {
   let statusCalls = 0
   let directoryCalls = 0
   const h = harness({
-    collaborationStatus: async () => {
-      statusCalls += 1
-      return {ok: true, value: status}
-    },
-    collaborationDirectory: async (_input, _signal) => {
-      directoryCalls += 1
-      return {ok: true, value: directory}
-    },
+    collaborationStatus: async () => { statusCalls++; throw new Error('Offline') },
+    collaborationDirectory: async () => { directoryCalls++; return {ok: true, value: directory} },
   })
-  h.source.warm?.(h.clientSession)
-  await waitUntil(() => directoryCalls === 2)
-  assert.equal(statusCalls, 1)
   await h.source.candidates(h.clientSession, h.request(''))
   await h.source.candidates(h.clientSession, h.request(''))
-  assert.equal(statusCalls, 1)
-  assert.equal(directoryCalls, 2)
+  assert.equal(statusCalls, 0)
+  assert.equal(directoryCalls, 4)
 })
 
 test('browses all Agents and searches every matching page of each kind', async () => {
@@ -532,48 +519,55 @@ test('browses all Agents and searches every matching page of each kind', async (
   h.runtime.dispose()
 })
 
-test('first explicit mention uses the uploaded workspace channel once without a project picker', async () => {
-  let bound = false
-  let binds = 0
-  let reads = 0
+const denied = {ok: false as const, error: {code: 'loop-host/waiting-for-access', message: 'Denied'}}
+
+async function pickMention(h: ReturnType<typeof harness>, index = 0) {
+  const rows = await h.source.candidates(h.clientSession, h.request(''))
+  const picked = h.source.onPick({candidate: rows[index]!, session: h.clientSession, position: 'leading',
+    via: 'menu', action: 'pick', span: {start: 0, end: 1}})
+  assert.ok(picked && picked !== 'handled' && 'insert' in picked)
+  return picked.insert.ref
+}
+
+test('browsing, picking and serializing identities need only directory permission', async () => {
+  const calls: string[] = []
   const h = harness({
-    status: async () => ({ ok: true, value: {
-      state: 'active', revision: 'channel-binding', workspace,
-      loop: { serviceBaseUrl: 'https://loop.test', workspaceId: 'wsp_loop', projectId: '',
-        defaultChannelId: 'chn_workspace', workspaceName: 'Team', projectName: '', webUrl: 'https://loop.test/channel' },
-      agent: { id: 'agt_coord', displayName: 'Coordinator' },
-    } }),
-    collaborationStatus: async () => ({ ok: true, value: bound
-      ? { ...status, scope: { ...scope, projectId: '', projectName: '', boardId: 'chn_workspace' } }
-      : { ...status, state: 'unbound', scope: undefined } }),
-    collaborationBind: async input => {
-      binds += 1
-      assert.equal(input.boardId, 'chn_workspace')
-      assert.equal(input.workspaceId, 'wsp_loop')
-      assert.equal(input.coordinatorAgentId, 'agt_coord')
-      assert.equal(input.expectedRevision, undefined)
-      bound = true
-      return { ok: true, value: status }
+    collaborationDirectory: async input => {
+      calls.push(input.kinds![0]! + ':' + input.query)
+      return {ok: true, value: directory}
     },
-    collaborationDirectory: async () => {
-      reads += 1
-      return { ok: true, value: directory }
-    },
+    status: async () => assert.fail('workspace binding consulted'),
+    collaborationStatus: async () => assert.fail('collaboration inspection consulted'),
+    collaborationBind: async () => assert.fail('channel bound'),
+    prepareCollaborationIntent: async () => assert.fail('unexpected intent'),
   })
-  const runtime = h.runtime.forSession(sessionId)
-  await runtime.warm()
-  assert.equal(binds, 0, 'passive warmup must not create a collaboration binding')
-  const [first, concurrent] = await Promise.all([
-    runtime.ensureDirectory('', new AbortController().signal),
-    runtime.ensureDirectory('', new AbortController().signal),
-  ])
-  assert.equal(first[0]?.targetId, 'agt_research')
-  assert.equal(concurrent[0]?.targetId, 'agt_research')
-  await runtime.ensureDirectory('', new AbortController().signal)
-  assert.equal(binds, 1)
-  assert.equal(reads, 2, 'subsequent mentions reuse the scoped local catalog')
-  assert.deepEqual(h.openedBindings, [])
-  runtime.dispose()
+  const refs = await Promise.all([pickMention(h, 0), pickMention(h, 1)])
+  const tokens = await Promise.all(refs.map(ref => h.source.codec!.serialize(ref, new AbortController().signal)))
+  assert.ok(tokens[0]!.includes('agt_research') && tokens[1]!.includes('mem_zhang'))
+  assert.ok(tokens.every(token => token.includes('directory="scope:agents-humans"')))
+  assert.deepEqual(calls.slice(-2), ['agent:agt_research', 'human:mem_zhang'])
+  assert.equal(h.runtime.forSession(sessionId).store.getSnapshot().pendingIntent, false)
+  h.runtime.dispose()
+})
+
+test('directory-only submission rejects a changed grant and a removed target', async () => {
+  const h = harness()
+  const ref = await pickMention(h)
+  for (const value of [{...directory, cacheKey: 'another-grant'}, {...directory, entries: []}]) {
+    h.remote.collaborationDirectory = async () => ({ok: true, value})
+    await assert.rejects(h.source.codec!.serialize(ref, new AbortController().signal), /changed/)
+  }
+  h.runtime.dispose()
+})
+
+test('a denied directory shows a reason in the menu and does not insert a reference', async () => {
+  const h = harness({collaborationDirectory: async () => denied})
+  const [row] = await h.source.candidates(h.clientSession, h.request('Ada'))
+  assert.equal(row?.name, 'Denied')
+  assert.equal(h.source.onPick({candidate: row!, session: h.clientSession, position: 'leading',
+    via: 'menu', action: 'pick', span: {start: 0, end: 1}}), 'handled')
+  assert.equal(h.runtime.forSession(sessionId).store.getSnapshot().overlay, 'details')
+  h.runtime.dispose()
 })
 
 test('an authorized but temporarily offline Agent remains selectable for execution-time recheck', async () => {
@@ -602,85 +596,14 @@ test('an authorized but temporarily offline Agent remains selectable for executi
   assert.equal(h.runtime.forSession(sessionId).store.getSnapshot().error, null)
 })
 
-test('one shared catalog event refreshes the next mention without polling', async () => {
-  let release!: () => void
-  const gate = new Promise<void>(resolve => { release = resolve })
-  let gateReleased = false
-  let catalogDelivered = false
-  let statusCalls = 0
-  let directoryCalls = 0
-  const h = harness({
-    collaborationStatus: async () => {
-      statusCalls += 1
-      return {ok: true, value: status}
-    },
-    collaborationDirectory: async () => {
-      directoryCalls += 1
-      return {ok: true, value: {...directory, entries: gateReleased
-        ? [{...directory.entries[0]!, displayName: 'New Agent'}]
-        : [directory.entries[0]!]}}
-    },
-  }, [], {
-    catalogEvents: async function* () {
-      await gate
-      yield {
-        type: 'change',
-        event: {
-          eventId: 'directory-event-1',
-          kind: 'directory.changed',
-          occurredAt: 'now',
-          sessionId,
-          workspaceId: 'wsp_loop',
-          installationId: 'ins_1',
-          accountId: 'usr_alice',
-          serverBaseUrl: 'https://loop.test',
-        },
-      }
-      catalogDelivered = true
-      await new Promise<void>(resolve => setTimeout(resolve, 10))
-    },
-  })
-  h.source.warm?.(h.clientSession)
-  await waitUntil(() => directoryCalls === 2)
-  gateReleased = true
-  release()
-  await waitUntil(() => catalogDelivered)
-  assert.equal(directoryCalls, 2)
+test('reopening the directory after a missed event reflects renames and removals', async () => {
+  const h = harness()
+  await pickMention(h)
+  h.remote.collaborationDirectory = async () => ({ok: true, value: {...directory, entries: [{
+    ...directory.entries[0]!, displayName: 'Renamed agent',
+  }]}})
   const rows = await h.source.candidates(h.clientSession, h.request(''))
-  assert.ok(rows.some(row => row.name === 'New Agent'))
-  h.runtime.dispose()
-  assert.equal(statusCalls, 1)
-  assert.equal(directoryCalls, 4)
-})
-
-test('a stale connection status recovers through the existing workspace channel on the next mention', async () => {
-  let reads = 0
-  let binds = 0
-  const restored = {...status, scope: {...scope, bindingId: 'cbind_new'}}
-  const h = harness({
-    collaborationStatus: async () => ({ok: true, value: ++reads === 1
-      ? {...status, state: 'binding-conflict'}
-      : binds === 0 ? {...status, state: 'unbound'} : restored}),
-    status: async () => ({ok: true, value: {
-      state: 'active', revision: 'binding-1', workspace,
-      loop: {serviceBaseUrl: 'https://loop.test', workspaceId: 'wsp_loop',
-        workspaceName: 'Team', projectId: '', projectName: '', defaultChannelId: 'chn_local',
-        webUrl: 'https://loop.test/channel'},
-      agent: {id: 'agt_coord', displayName: 'Coordinator'},
-    }}),
-    collaborationBind: async input => {
-      binds++
-      assert.equal(input.boardId, 'chn_local')
-      assert.equal(input.coordinatorAgentId, 'agt_coord')
-      return {ok: true, value: {scope: restored.scope, capability, subscription: status.subscription}}
-    },
-  })
-  const runtime = h.runtime.forSession(sessionId)
-  await runtime.refreshStatus()
-  const entries = await runtime.ensureDirectory('', new AbortController().signal)
-  assert.ok(entries.some(entry => entry.targetId === 'agt_research'))
-  assert.equal(binds, 1)
-  assert.equal(runtime.store.getSnapshot().status?.scope?.bindingId, 'cbind_new')
+  assert.deepEqual(rows.map(row => row.name), ['Renamed agent'])
   h.runtime.dispose()
 })
 
@@ -731,7 +654,7 @@ test('one failed delivery leaves agent discovery and a new personal task submiss
     },
   })
   const runtime = h.runtime.forSession(sessionId)
-  await runtime.ensureDirectory('', new AbortController().signal)
+  await runtime.warm()
   release()
   await waitUntil(() => runtime.store.getSnapshot().status?.deliveries.length === 1)
   assert.equal(runtime.store.getSnapshot().status?.state, 'degraded')
@@ -791,6 +714,8 @@ test('share confirmation resolves the original serializer and binds one pending 
       }
     },
   })
+  await h.runtime.forSession(sessionId).refreshStatus()
+  h.runtime.forSession(sessionId).setShareScope('selected-resources')
   const rows = await h.source.candidates(h.clientSession, h.request(''))
   const outcome = h.source.onPick({
     candidate: rows[0]!,
@@ -867,6 +792,8 @@ test('first expanded audience uses the local review state even when Host flags a
       }
     },
   })
+  await h.runtime.forSession(sessionId).refreshStatus()
+  h.runtime.forSession(sessionId).setShareScope('selected-resources')
   const rows = await h.source.candidates(h.clientSession, h.request(''))
   const outcome = h.source.onPick({
     candidate: rows[0]!,
@@ -912,6 +839,8 @@ test('a failed placeholder cancel is visible and never binds the accepted messag
       }
     },
   })
+  await h.runtime.forSession(sessionId).refreshStatus()
+  h.runtime.forSession(sessionId).setShareScope('selected-resources')
   const rows = await h.source.candidates(h.clientSession, h.request(''))
   const outcome = h.source.onPick({
     candidate: rows[0]!,
@@ -945,6 +874,8 @@ test('a failed placeholder cancel is visible and never binds the accepted messag
 
 test('a stale binding reference fails explicitly before preparing an intent', async () => {
   const h = harness()
+  await h.runtime.forSession(sessionId).refreshStatus()
+  h.runtime.forSession(sessionId).setShareScope('selected-resources')
   const rows = await h.source.candidates(h.clientSession, h.request(''))
   const outcome = h.source.onPick({
     candidate: rows[0]!,
@@ -1005,6 +936,8 @@ test('binding ignores a stale pre-bind status response and keeps the confirmed s
     value: { ...status, scope: { ...scope, bindingRevision: 'rev-binding-2' } },
   })
   await runtime.bindBoard('brd_1')
+  await h.runtime.forSession(sessionId).refreshStatus()
+  h.runtime.forSession(sessionId).setShareScope('selected-resources')
   const rows = await h.source.candidates(h.clientSession, h.request(''))
   const outcome = h.source.onPick({
     candidate: rows[0]!,
@@ -1273,6 +1206,8 @@ test('cancelling share review rejects the original serializer and cancels only t
       return {ok: true, value: {state: 'not-dispatched'}}
     },
   })
+  await h.runtime.forSession(sessionId).refreshStatus()
+  h.runtime.forSession(sessionId).setShareScope('selected-resources')
   const rows = await h.source.candidates(h.clientSession, h.request(''))
   const outcome = h.source.onPick({
     candidate: rows[0]!,
@@ -1329,6 +1264,8 @@ test('one share confirmation covers every target in the original multi-target su
       }
     },
   })
+  await h.runtime.forSession(sessionId).refreshStatus()
+  h.runtime.forSession(sessionId).setShareScope('selected-resources')
   const rows = await h.source.candidates(h.clientSession, h.request(''))
   const outcomes = rows.slice(0, 2).map(row => h.source.onPick({
     candidate: row,
@@ -1388,7 +1325,8 @@ test('confirmed Host-managed submission never waits for a Client bind callback',
     cancelCollaborationIntent: async () => { calls.push('cancel'); return {ok: true, value: {state: 'not-dispatched'}} },
     bindCollaborationIntent: async () => { throw new Error('Client must not bind Host-managed input') },
   })
-  const rows = await h.source.candidates(h.clientSession, h.request(''))
+  await h.runtime.forSession(sessionId).refreshStatus()
+    const rows = directory.entries.map(entry => ({name: entry.displayName, value: h.runtime.forSession(sessionId).candidateValue(entry)}))
   const outcome = h.source.onPick({candidate: rows[0]!, session: h.clientSession, position: 'leading', via: 'menu', action: 'pick', span: {start: 0, end: 1}})
   assert.ok(outcome !== undefined && outcome !== 'handled' && 'insert' in outcome)
   const serialization = h.source.codec!.serialize(outcome.insert.ref, new AbortController().signal)
@@ -1430,7 +1368,8 @@ for (const state of ['failed', 'activated'] as const) {
         })
       },
     })
-    const rows = await h.source.candidates(h.clientSession, h.request(''))
+    await h.runtime.forSession(sessionId).refreshStatus()
+    const rows = directory.entries.map(entry => ({name: entry.displayName, value: h.runtime.forSession(sessionId).candidateValue(entry)}))
     const outcome = h.source.onPick({candidate: rows[0]!, session: h.clientSession, position: 'leading', via: 'menu', action: 'pick', span: {start: 0, end: 1}})
     assert.ok(outcome !== undefined && outcome !== 'handled' && 'insert' in outcome)
     await h.source.codec!.serialize(outcome.insert.ref, new AbortController().signal)

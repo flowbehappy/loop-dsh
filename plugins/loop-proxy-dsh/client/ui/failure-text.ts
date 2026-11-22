@@ -96,6 +96,11 @@ export function settingsReasonText(t: LoopMenuTranslate, reason: string): string
  */
 export function collaborationFailureText(t: LoopMenuTranslate, failure: RemoteFailure): string {
   switch (failure.code) {
+    case 'loop-host/waiting-for-access': return t('collab.error.permission')
+    case 'loop-host/needs-auth':
+    case 'loop-host/revoked': return t('collab.error.auth')
+    case 'loop-host/timeout':
+    case 'loop-host/backend-unavailable': return t('collab.error.offline')
     case 'loop-collaboration/cancelled': return t('collab.notice.intentDiscarded')
     case 'loop-collaboration/human-disabled': return t('collab.error.humanDisabled')
     case 'loop-collaboration/not-bound': return t('collab.error.notBound')

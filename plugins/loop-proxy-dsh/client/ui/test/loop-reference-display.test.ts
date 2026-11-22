@@ -28,6 +28,13 @@ test('sent skill and agent references display readable names while retaining exa
   assert.equal(loopReferenceDisplayRule.match(text, second.end, context), undefined)
 })
 
+test('a current directory mention displays only the selected name', () => {
+  const wire = agent.replace('">', '" directory="dsh-current">')
+  const node = loopReferenceDisplayRule.match(wire, 0, context)
+  assert.equal(node?.data.display, '@审阅 & <检查>')
+  assert.equal(node?.data.text, wire)
+})
+
 test('malformed references remain visible and do not prevent a later valid match', () => {
   const invalid = '<loop-skill-ref>not-json</loop-skill-ref>'
   const text = `${invalid} ${skill}`

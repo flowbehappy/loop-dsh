@@ -56,8 +56,8 @@ request can identify collaborators or authorize you to choose suitable ones.
 Use directory evidence to select within that scope, then call
 `collaboration_prepare({targetIds:[...]})` with the complete set. This accepts
 targets against the actual user message without requiring the DSH @ picker;
-it sends no task or invitation and grants no channel access. An existing @
-selection remains usable without preparing it again. First load
+it sends no task or invitation and grants no channel access. For an ordinary @
+selection, use its targetId in the same preparation step. First load
 `loop-proxy guide tasks` and complete its
 channel membership/invitation steps. `collaboration_dispatch` creates and assigns the
 Loop Task itself; ask the agent to perform and complete that task. Use the active

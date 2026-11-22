@@ -176,7 +176,7 @@ function naturalSelectionFixture(overrides = {}) {
   const f = runtimeFixture({
     async collaborationDirectory(request) {
       calls.push(["directory", request])
-      return {entries: [{targetId: request.query, memberId: request.query, targetType: "agent",
+      return {cacheKey: "dsh-current", entries: [{targetId: request.query, memberId: request.query, targetType: "agent",
         agentId: "agt_worker", displayName: "Worker", visible: true, capability: {delegable: true}}]}
     },
     async collaborationStatus() { return {state: "unbound"} },
@@ -188,7 +188,7 @@ function naturalSelectionFixture(overrides = {}) {
     async collaborationAction(request) { calls.push(["action", request]); return {receipt: {taskId: `task_${request.arguments.target.targetId}`}} },
     ...overrides,
   }, {defineTool: definition => definition, toolRegistrations: registrations,
-    withSessionContext: async (_id, _signal, operation) => operation(context)})
+    withSessionContext: async (_id, _signal, operation) => operation(context, undefined, async () => ({channelId:context.defaultChannelId, members:["mem_a","mem_b","mem_worker"].map(memberId => ({memberId})), hasMore:false}))})
   const message = {id: "natural-user", role: "user", content: [{type: "text", text: "Choose two suitable Agents and give each a review task."}],
     source: {kind: "user", rpcId: "natural-request"}}
   const claim = async () => {
@@ -201,6 +201,51 @@ function naturalSelectionFixture(overrides = {}) {
     tool: name => registrations.find(item => item.definition.name === name).definition,
     exec: {agent: f.agent, signal: new AbortController().signal}}
 }
+
+test("mention identity is checked against the current grant before explicit preparation and dispatch", async () => {
+  for (const directory of ["dsh-current", "dsh-replaced"]) {
+    const f = naturalSelectionFixture()
+    f.message.content[0].text = `Assign the review to <loop-collaboration type="agent" target="mem_a" ref="agent:mem_a" directory="${directory}">Worker</loop-collaboration>.`
+    await f.claim()
+    assert.deepEqual(f.calls, [])
+    const prepare = () => f.tool("collaboration_prepare").execute({targetIds:["mem_a"]}, f.exec)
+    if (directory !== "dsh-current") {
+      await assert.rejects(prepare(), /identity changed/)
+      assert.ok(f.calls.every(([name]) => name === "directory"))
+      continue
+    }
+    assert.equal((await prepare()).state, "ready")
+    const result = await f.tool("collaboration_dispatch").execute({tasks:[{title:"Review",description:"Read the draft",assignee:"mem_a"}]},f.exec)
+    assert.equal(result.receipt.taskId, "task_mem_a")
+  }
+})
+
+test("mentioning a nonmember allows a task only after a separately authorized invitation and a fresh roster check", async () => {
+  const f = naturalSelectionFixture()
+  let member = false
+  let mode = "denied"
+  const cursors = []
+  f.collaboration.withSessionContext = async (_id, _signal, operation) => operation(f.context, [], async cursor => {
+    cursors.push(cursor)
+    if (mode === "denied") throw new Error("Channel roster permission denied")
+    if (!cursor) return {channelId:"chn_1",members:[{memberId:"other"}],hasMore:true,nextCursor:"second"}
+    return {channelId:"chn_1",members:member ? [{memberId:"mem_a"}] : [],hasMore:mode === "repeated",nextCursor:"second"}
+  })
+  await f.claim()
+  const prepare = () => f.tool("collaboration_prepare").execute({targetIds:["mem_a"]}, f.exec)
+  await assert.rejects(prepare(), /permission denied/)
+  mode = "repeated"
+  await assert.rejects(prepare(), /Membership is unknown/)
+  mode = "complete"
+  const result = await prepare()
+  assert.equal(result.state,"not-in-channel")
+  assert.equal(result.channelId,"chn_1")
+  assert.deepEqual(result.missing.map(agent => agent.agentId),["agt_worker"])
+  assert.ok(f.calls.every(([name]) => name === "directory"))
+  member = true
+  assert.equal((await prepare()).state,"ready")
+  assert.deepEqual(cursors.slice(-2),[undefined,"second"])
+})
 
 test("natural-language selection reuses durable user intent and the saved channel for multiple dispatches without @", async () => {
   const f = naturalSelectionFixture()
@@ -325,7 +370,7 @@ test("a read retry cannot move the original selection to a different route or co
   for (const change of ["account", "channel", "revision"]) {
     const f = naturalSelectionFixture({async collaborationStatus() { throw new Error("read temporarily unavailable") }})
     let account = "account_1"
-    f.collaboration.withSessionContext = async (_id, _signal, operation) => operation(f.context, ["server", account, "install"])
+    f.collaboration.withSessionContext = async (_id, _signal, operation) => operation(f.context, ["server", account, "install"], async () => ({channelId:f.context.defaultChannelId,members:[{memberId:"mem_a"}],hasMore:false}))
     await f.claim()
     const prepare = () => f.tool("collaboration_prepare").execute({targetIds: ["mem_a"]}, f.exec)
     await assert.rejects(prepare(), /read temporarily unavailable/u)
@@ -2293,7 +2338,7 @@ test("official Harness loads collaboration tools on demand and follows the task 
   const naturalScope = {...eventScope(), boardId: "chn_1", bindingRevision: "3", coordinatorAgentId: "agt_self",
     serverBaseUrl: "https://loop.example.test", accountId: "human_1", installationId: "installation_1"}
   const runtime = new LoopCollaborationRuntime({ctx, sessions: ctx.sessions, defineTool,
-    withSessionContext: async (_id, _signal, operation) => operation({defaultChannelId: "chn_1", loopWorkspaceId: "wsp_1", agent: {id: "agt_self"}}),
+    withSessionContext: async (_id, _signal, operation) => operation({defaultChannelId: "chn_1", loopWorkspaceId: "wsp_1", agent: {id: "agt_self"}}, undefined, async () => ({channelId:"chn_1",members:[{memberId:"mem_worker"}],hasMore:false})),
     actions: () => ({
     async collaborationDirectory() { return {entries: [{targetId: "mem_worker", memberId: "mem_worker", targetType: "agent", visible: true, agentId: "agt_worker", capability: {assignable: true}}]} },
     async collaborationStatus() { return {state: "unbound"} },

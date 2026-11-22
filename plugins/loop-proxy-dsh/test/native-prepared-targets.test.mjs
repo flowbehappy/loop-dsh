@@ -35,7 +35,11 @@ test('natural-language prepareTargets activates a native intent only for the sel
     collaborationBindIntent: service.bindIntent.bind(service),
     collaborationActivateIntent: service.activateIntent.bind(service),
   }
-  const runtime = new LoopCollaborationRuntime({ctx, actions: () => actions, withSessionContext: (_id, _signal, fn) => fn(context)})
+  const runtime = new LoopCollaborationRuntime({ctx, actions: () => actions,
+    withSessionContext: (_id, _signal, fn) => fn(context, [], async () => ({
+      channelId: context.defaultChannelId, members: targetIds.map(memberId => ({memberId})), hasMore: false,
+    })),
+  })
   const message = {role: 'user', id: 'message-test', source: {kind: 'user', rpcId: 'request-test'}, content: [{type: 'text', text: 'Assign each chosen agent a review.'}]}
   const targetIds = ['member-one', 'member-two']
   await assert.rejects(runtime.prepareTargets(session.id, {targetIds}), {code: 'loop-collaboration/intent-not-accepted'})

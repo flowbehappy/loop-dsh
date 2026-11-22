@@ -19,27 +19,24 @@ import {
   serializeCollaborationReference,
   type CollaborationReference,
 } from './collaboration-reference.ts'
-import {
-  catalogScopeKey,
-  InputCatalogCache,
-  type CatalogScopeIdentity,
-} from './input-catalog-cache.ts'
 import type {
   BindingView,
   CollaborationBoard,
   CollaborationContinuationResult,
   CollaborationDirectoryEntry,
   CollaborationEventFrame,
-  CollaborationScope,
   CollaborationSharePreview,
   CollaborationShareScope,
   CollaborationStatus,
   LoopHostClient,
   RemoteFailure,
   RemoteResult,
-  SkillCatalogEventFrame,
   WorkspaceRef,
 } from './types.ts'
+
+type MentionEntry = CollaborationDirectoryEntry & {
+  readonly directoryKey?: string
+}
 
 export interface CollaborationPendingSubmission {
   readonly requestId: string
@@ -151,10 +148,7 @@ export interface CollaborationRuntimeOptions {
   readonly openLoopProject: () => void
   readonly openWorksiteSetup?: (scope: NonNullable<CollaborationStatus['scope']>) => void
   readonly openTask: (workspaceId: string, taskId: string) => boolean
-  readonly catalogEvents?: (
-    sessionId: string,
-    signal: AbortSignal,
-  ) => AsyncIterable<SkillCatalogEventFrame>
+
 }
 
 interface PreparedTarget {
@@ -176,6 +170,7 @@ interface PreparedBatch {
 }
 
 interface BatchBuilder {
+  readonly routes: Promise<CollaborationStatus>[]
   readonly targets: PreparedTarget[]
   readonly tokens: string[]
   readonly targetNames: string[]
@@ -221,23 +216,6 @@ function resultValue<T>(result: RemoteResult<T>): T {
   return result.value
 }
 
-function collaborationDirectoryIdentity(
-  sessionId: string,
-  scope: CollaborationScope,
-): CatalogScopeIdentity {
-  return {
-    serverBaseUrl: scope.serverBaseUrl,
-    accountId: scope.accountId,
-    installationId: scope.installationId,
-    workspaceId: scope.workspaceId,
-    bindingId: scope.bindingId,
-    bindingRevision: scope.bindingRevision,
-    bindingEpoch: scope.bindingEpoch,
-    projectId: scope.projectId,
-    agentId: scope.coordinatorAgentId,
-  }
-}
-
 function requestMatchesText(request: CollaborationPendingSubmission, tokens: readonly string[]): boolean {
   return tokens.length > 0 && tokens.every(token => request.text.includes(token))
 }
@@ -254,10 +232,7 @@ export class CollaborationSessionRuntime {
   private readonly face: CollaborationSessionFace
   private readonly unsubscribeSession: () => void
   private statusPromise: Promise<CollaborationStatus> | null = null
-  private workspaceBindingPromise: Promise<CollaborationStatus> | null = null
   private statusGeneration = 0
-  private directoryCache: InputCatalogCache<CollaborationDirectoryEntry> | null = null
-  private directoryCacheKey = ''
   private batchBuilder: BatchBuilder | null = null
   private prepared: PreparedBatch | null = null
   private pendingRecovery: PendingIntentRecovery | null = null
@@ -268,10 +243,7 @@ export class CollaborationSessionRuntime {
   private readonly continuationFailures = new Map<string, ContinuationFailure>()
   private openBindingTimer: ReturnType<typeof setTimeout> | null = null
   private readonly seenEventIds = new Set<string>()
-  private readonly seenCatalogEventIds = new Set<string>()
-  private lastStreamSequence = 0
   private stream: AbortController | null = null
-  private catalogStream: AbortController | null = null
   private streamBindingEpoch = ''
   private disposed = false
 
@@ -303,15 +275,9 @@ export class CollaborationSessionRuntime {
     this.unsubscribeSession()
     this.stream?.abort()
     this.stream = null
-    this.catalogStream?.abort()
-    this.catalogStream = null
     this.streamBindingEpoch = ''
-    this.directoryCache?.reset()
-    this.directoryCache = null
-    this.directoryCacheKey = ''
     this.continuationRequests.clear()
     this.continuationFailures.clear()
-    this.seenCatalogEventIds.clear()
     this.rejectShareConsent(new CollaborationRuntimeError(
       'loop-collaboration/cancelled',
       'The collaborator message was closed before confirmation.',
@@ -320,11 +286,12 @@ export class CollaborationSessionRuntime {
   }
 
   async warm(): Promise<void> {
-    const status = await this.refreshStatus().catch(() => undefined)
-    if (status === undefined || (status.state !== 'ready' && status.state !== 'degraded')) return
-    this.startCatalogStream()
-    const controller = new AbortController()
-    await this.ensureDirectory('', controller.signal).catch(() => undefined)
+    // Restore task/delivery status independently of the composer directory.
+    await this.refreshStatus().catch(() => undefined)
+  }
+
+  readonly showDirectoryError = (): void => {
+    this.patch({overlay: 'details'})
   }
 
   readonly openDetails = async (): Promise<void> => {
@@ -394,72 +361,30 @@ export class CollaborationSessionRuntime {
     return task
   }
 
-  private async currentStatus(): Promise<CollaborationStatus> {
-    const state = this.store.getSnapshot()
-    if (state.status !== null && state.screen !== 'error' &&
-        ['ready', 'degraded', 'unbound', 'needs-board'].includes(state.status.state)) return state.status
-    return await this.refreshStatus()
-  }
-
   async ensureDirectory(
     query: string,
     signal: AbortSignal,
     kinds: readonly ('agent' | 'human')[] = ['agent', 'human'],
-  ): Promise<readonly CollaborationDirectoryEntry[]> {
-    let status = await this.currentStatus()
+  ): Promise<readonly MentionEntry[]> {
     signal.throwIfAborted()
-    if (status.state === 'needs-board' || status.state === 'unbound') status = await this.bindWorkspaceChannel()
-    signal.throwIfAborted()
-    const scope = status.scope
-    if (scope === undefined || (status.state !== 'ready' && status.state !== 'degraded')) {
-      throw new CollaborationRuntimeError(
-        status.state === 'needs-board' ? 'loop-collaboration/not-bound' : `loop-collaboration/${status.state}`,
-        status.reason ?? 'Choose a Loop board before mentioning collaborators.',
-      )
-    }
-    this.startCatalogStream()
-    const identity = collaborationDirectoryIdentity(this.sessionId, scope)
-    const cacheKey = catalogScopeKey('collaborators', this.sessionId, identity) + JSON.stringify([...kinds].sort())
-    if (this.directoryCache === null || this.directoryCacheKey !== cacheKey) {
-      this.directoryCache = new InputCatalogCache(identity, async (_, fetchSignal) => ({
-        items: await this.readDirectoryGroups('', scope.bindingRevision, kinds, fetchSignal),
-        revision: scope.bindingRevision,
-        hasMore: false,
-      }))
-      this.directoryCacheKey = cacheKey
-    }
-    const cache = this.directoryCache
     const name = query.trim()
-    const searched = name
-      ? await this.readDirectoryGroups(name, scope.bindingRevision, kinds, signal)
-      : await cache.ensureLoaded(signal)
-    if (cache !== this.directoryCache) {
-      throw new CollaborationRuntimeError(
-        'loop-collaboration/binding-stale',
-        'Loop collaboration changed while the search was running.',
-      )
-    }
-    return searched
-  }
-
-  private async readDirectoryGroups(
-    query: string,
-    revision: string,
-    kinds: readonly ('agent' | 'human')[],
-    signal: AbortSignal,
-  ): Promise<CollaborationDirectoryEntry[]> {
+    let directoryKey: string | undefined
     const groups = await Promise.all(kinds.map(async kind => {
-      const entries = new Map<string, CollaborationDirectoryEntry>()
+      const entries = new Map<string, MentionEntry>()
       const cursors = new Set<string>()
       let cursor: string | undefined
       do {
-        const page = await this.fetchDirectory(query, signal, revision, [kind], cursor)
+        const page = await this.fetchDirectory(name, signal, [kind], cursor)
+        if (!page.cacheKey || (directoryKey !== undefined && page.cacheKey !== directoryKey)) {
+          throw new CollaborationRuntimeError('loop-collaboration/binding-stale', 'The Loop directory changed during search.')
+        }
+        directoryKey = page.cacheKey
         for (const entry of page.entries) {
-          if (entry.targetType === kind) entries.set(entry.targetId, entry)
+          if (entry.targetType === kind && entry.visible) entries.set(entry.targetId, {...entry, directoryKey})
         }
         // Browsing shows all Agents and a first page of colleagues. A name
         // search reads every matching page from both server-side filters.
-        if (!query && kind === 'human') break
+        if (!name && kind === 'human') break
         cursor = page.nextCursor || undefined
         if (cursor && cursors.has(cursor)) {
           throw new CollaborationRuntimeError('loop-collaboration/server-unavailable', 'The Loop directory repeated a page cursor.')
@@ -471,51 +396,17 @@ export class CollaborationSessionRuntime {
     return groups.flat()
   }
 
-  private invalidateDirectory(): void {
-    this.directoryCache?.invalidate()
-  }
-
-  private async bindWorkspaceChannel(): Promise<CollaborationStatus> {
-    if (this.workspaceBindingPromise !== null) return await this.workspaceBindingPromise
-    const task = (async () => {
-      const workspace = this.options.workspaceForSession(this.sessionId)
-      const remote = this.options.remote
-      if (workspace === undefined || remote.status === undefined || remote.collaborationBind === undefined) {
-        return await this.currentStatus()
-      }
-      const binding = resultValue(await remote.status(workspace)) as BindingView
-      // Legacy project bindings retain their explicit board picker. New local
-      // workspaces already have an authorized, stable channel from host-sync.
-      if (binding.state !== 'active' || !binding.loop?.defaultChannelId ||
-        binding.loop.projectId || !binding.agent?.id) return await this.currentStatus()
-      if (this.disposed) return await this.currentStatus()
-      resultValue(await remote.collaborationBind({
-        sessionId: this.sessionId,
-        workspaceId: binding.loop.workspaceId,
-        boardId: binding.loop.defaultChannelId,
-        coordinatorAgentId: binding.agent.id,
-        shareScope: this.store.getSnapshot().shareScope,
-      }))
-      return await this.refreshStatus(true)
-    })()
-    this.workspaceBindingPromise = task
-    try {
-      return await task
-    } finally {
-      if (this.workspaceBindingPromise === task) this.workspaceBindingPromise = null
-    }
-  }
-
-  candidateValue(entry: CollaborationDirectoryEntry): string {
+  candidateValue(entry: MentionEntry): string {
     const status = this.store.getSnapshot().status
     const scope = status?.scope
-    if (scope === undefined) return ''
+    if (!scope && !entry.directoryKey) return ''
     return JSON.stringify({
       targetId: entry.targetId,
       targetType: entry.targetType,
       stableRef: entry.stableRef,
       displayName: entry.displayName,
-      bindingRevision: scope.bindingRevision,
+      bindingRevision: scope?.bindingRevision || undefined,
+      directoryKey: entry.directoryKey,
       visible: entry.visible,
       delegable: entry.delegable,
       notifiable: entry.notifiable,
@@ -542,7 +433,7 @@ export class CollaborationSessionRuntime {
       (value.targetType !== 'agent' && value.targetType !== 'human') ||
       typeof value.stableRef !== 'string' ||
       typeof value.displayName !== 'string' ||
-      typeof value.bindingRevision !== 'string'
+      (typeof value.directoryKey !== 'string' && typeof value.bindingRevision !== 'string')
     ) return undefined
     const reference: CollaborationReference = {
       version: 1,
@@ -551,7 +442,8 @@ export class CollaborationSessionRuntime {
       targetType: value.targetType,
       stableRef: value.stableRef,
       displayName: value.displayName,
-      bindingRevision: value.bindingRevision,
+      ...(typeof value.bindingRevision === 'string' ? {bindingRevision: value.bindingRevision} : {}),
+      ...(typeof value.directoryKey === 'string' ? {directoryKey: value.directoryKey} : {}),
     }
     const ref = encodeCollaborationReference(reference)
     return {
@@ -573,52 +465,68 @@ export class CollaborationSessionRuntime {
         'This collaborator reference belongs to another Session. Select it again in this Session.',
       )
     }
+    const token = serializeCollaborationReference(reference)
+    const share = this.store.getSnapshot().shareScope
+    if (reference.directoryKey && share.scope === 'task-description' && share.resourceRefs.length === 0) {
+      await this.verifyDirectoryMember(reference, signal)
+      return token
+    }
     if (this.prepared !== null || this.pendingRecovery !== null) {
       throw new CollaborationRuntimeError(
         'loop-collaboration/intent-already-bound',
         'Another Loop collaborator message is still being linked. Wait, retry, or discard that pending intent.',
       )
     }
-    const status = await this.refreshStatus()
-    signal.throwIfAborted()
-    const scope = status.scope
-    if (scope === undefined || (status.state !== 'ready' && status.state !== 'degraded')) {
-      throw new CollaborationRuntimeError('loop-collaboration/not-bound', 'Choose a Loop board before sending.')
-    }
-    if (reference.bindingRevision !== scope.bindingRevision) {
-      throw new CollaborationRuntimeError(
-        'loop-collaboration/binding-stale',
-        'The Loop board changed. Remove this stale collaborator and select it again.',
-      )
-    }
-    const token = serializeCollaborationReference(reference)
     const builder = this.batchBuilder ?? this.newBatchBuilder()
     if (!builder.targets.some(target => target.targetId === reference.targetId && target.targetType === reference.targetType)) {
-      const intendedActions = reference.targetType === 'agent'
-        ? ['dispatch', 'followup'] as const
-        : ['dispatch', 'followup'] as const
       builder.targets.push({
         targetId: reference.targetId,
         targetType: reference.targetType,
         stableRef: reference.stableRef,
-        intendedActions,
+        intendedActions: ['dispatch', 'followup'],
       })
       builder.tokens.push(token)
       builder.targetNames.push(reference.displayName)
     }
+    builder.routes.push(this.submissionRoute(reference, signal))
     await builder.ready
-    signal.throwIfAborted()
-    let prepared: PreparedBatch
     try {
-      prepared = await this.prepareBatch(builder, scope.bindingRevision, signal)
-    } catch (error) {
+      // The Host asks every chip to serialize concurrently. Directory rechecks
+      // can finish out of order; all must agree before preparing any recipient.
+      const routes = await Promise.all(builder.routes)
+      signal.throwIfAborted()
+      const scope = routes[0]?.scope
+      if (routes.some(route => route?.scope?.bindingId !== scope?.bindingId ||
+          route?.scope?.bindingRevision !== scope?.bindingRevision)) {
+        throw new CollaborationRuntimeError('loop-collaboration/binding-stale', 'The selected collaborators belong to different routes.')
+      }
+      if (!scope) throw new CollaborationRuntimeError('loop-collaboration/not-bound', 'Choose a Loop board before sharing.')
+      this.prepared = await this.prepareBatch(builder, scope.bindingRevision, signal)
+      this.patch({ pendingIntent: true })
+      return token
+    } finally {
       if (this.batchBuilder === builder) this.batchBuilder = null
-      throw error
     }
-    this.prepared = prepared
-    this.batchBuilder = null
-    this.patch({ pendingIntent: true })
-    return token
+  }
+
+  private async verifyDirectoryMember(reference: CollaborationReference, signal: AbortSignal): Promise<void> {
+    const page = await this.fetchDirectory(reference.targetId, signal, [reference.targetType])
+    if (page.cacheKey !== reference.directoryKey || !page.entries.some(entry => entry.visible &&
+        entry.targetId === reference.targetId && entry.targetType === reference.targetType && entry.stableRef === reference.stableRef)) {
+      throw new CollaborationRuntimeError('loop-collaboration/binding-stale', 'The directory or collaborator changed. Select the collaborator again.')
+    }
+  }
+
+  private async submissionRoute(reference: CollaborationReference, signal: AbortSignal) {
+    if (reference.directoryKey) await this.verifyDirectoryMember(reference, signal)
+    const status = await this.refreshStatus()
+    if (!status.scope || (status.state !== 'ready' && status.state !== 'degraded')) {
+      throw new CollaborationRuntimeError('loop-collaboration/not-bound', 'Choose a Loop board before sending.')
+    }
+    if (reference.bindingRevision !== status.scope.bindingRevision) {
+      throw new CollaborationRuntimeError('loop-collaboration/binding-stale', 'The Loop board changed. Remove this stale collaborator and select it again.')
+    }
+    return status
   }
 
   async bindBoard(boardId: string): Promise<void> {
@@ -935,7 +843,7 @@ export class CollaborationSessionRuntime {
     let release!: () => void
     const ready = new Promise<void>(resolve => { release = resolve })
     queueMicrotask(release)
-    const builder = { targets: [], tokens: [], targetNames: [], ready, prepared: null }
+    const builder: BatchBuilder = { routes: [], targets: [], tokens: [], targetNames: [], ready, prepared: null }
     this.batchBuilder = builder
     return builder
   }
@@ -1322,7 +1230,6 @@ export class CollaborationSessionRuntime {
   private async fetchDirectory(
     query: string,
     signal: AbortSignal,
-    bindingRevision: string,
     kinds?: readonly ('agent' | 'human')[],
     cursor?: string,
   ) {
@@ -1336,7 +1243,6 @@ export class CollaborationSessionRuntime {
       sessionId: this.sessionId,
       query: query.slice(0, 200),
       limit: 50,
-      bindingRevision,
       ...(cursor === undefined ? {} : { cursor }),
       ...(kinds === undefined ? {} : { kinds }),
     }, signal)
@@ -1353,7 +1259,6 @@ export class CollaborationSessionRuntime {
     const controller = new AbortController()
     this.stream = controller
     this.streamBindingEpoch = bindingKey
-    this.lastStreamSequence = 0
     void (async () => {
       try {
         for await (const frame of this.options.remote.collaborationEvents!(
@@ -1381,70 +1286,6 @@ export class CollaborationSessionRuntime {
     })()
   }
 
-  private startCatalogStream(): void {
-    if (this.catalogStream !== null || this.options.catalogEvents === undefined) return
-    const controller = new AbortController()
-    this.catalogStream = controller
-    void (async () => {
-      try {
-        for await (const frame of this.options.catalogEvents!(this.sessionId, controller.signal)) {
-          if (controller.signal.aborted) break
-          this.applyCatalogFrame(frame)
-        }
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          this.invalidateDirectory()
-          this.patch({
-            screen: 'error',
-            error: {
-              code: 'loop-collaboration/server-unavailable',
-              message: error instanceof Error ? error.message : '',
-            },
-          })
-        }
-      } finally {
-        if (this.catalogStream === controller) {
-          this.catalogStream = null
-          if (!controller.signal.aborted && !this.disposed) {
-            this.invalidateDirectory()
-          }
-        }
-      }
-    })()
-  }
-
-  private applyCatalogFrame(frame: SkillCatalogEventFrame): void {
-    if (frame.type === 'ready') {
-      if (frame.subscription.snapshotRequired ||
-          frame.subscription.state === 'backoff' ||
-          frame.subscription.state === 'revoked' ||
-          frame.subscription.state === 'stopped') {
-        this.invalidateDirectory()
-      }
-      return
-    }
-    const event = frame.event
-    if (event.eventId !== '' && this.seenCatalogEventIds.has(event.eventId)) return
-    if (event.eventId !== '') {
-      this.seenCatalogEventIds.add(event.eventId)
-      if (this.seenCatalogEventIds.size > 256) {
-        const oldest = this.seenCatalogEventIds.values().next().value
-        if (oldest !== undefined) this.seenCatalogEventIds.delete(oldest)
-      }
-    }
-    if (event.kind === 'subscription.changed') {
-      if (event.status?.snapshotRequired === true ||
-          event.status?.state === 'backoff' ||
-          event.status?.state === 'revoked' ||
-          event.status?.state === 'stopped') {
-        this.invalidateDirectory()
-      }
-      return
-    }
-    if (event.kind !== 'directory.changed') return
-    this.invalidateDirectory()
-  }
-
   private applyFrame(frame: CollaborationEventFrame): void {
     if (frame.type === 'ready') {
       this.patch({ status: frame.status ?? this.store.getSnapshot().status })
@@ -1454,10 +1295,6 @@ export class CollaborationSessionRuntime {
       this.patch({ error: frame.error })
       return
     }
-    if (this.lastStreamSequence > 0 && frame.sequence > this.lastStreamSequence + 1) {
-      this.invalidateDirectory()
-    }
-    this.lastStreamSequence = Math.max(this.lastStreamSequence, frame.sequence)
     if (this.seenEventIds.has(frame.event.eventId)) return
     this.seenEventIds.add(frame.event.eventId)
     if (this.seenEventIds.size > 256) {
@@ -1484,10 +1321,7 @@ export class CollaborationSessionRuntime {
       void this.refreshStatus().catch(() => undefined)
       return
     }
-    if (frame.event.kind === 'directory.changed') {
-      this.invalidateDirectory()
-      return
-    }
+    if (frame.event.kind === 'directory.changed') return
     const current = this.store.getSnapshot().status
     if (current === null) return
     if (frame.event.worksite !== undefined) {
@@ -1523,23 +1357,15 @@ export class CollaborationSessionRuntime {
       'loop-collaboration/binding-stale',
       'The Loop board changed during share review.',
     ))
-    this.invalidateDirectory()
-    this.directoryCache?.reset()
-    this.directoryCache = null
-    this.directoryCacheKey = ''
     this.prepared = null
     this.batchBuilder = null
     this.pendingRecovery = null
     this.handledRequestIds.clear()
-    this.seenCatalogEventIds.clear()
     this.continuationRequests.clear()
     this.continuationFailures.clear()
     this.stream?.abort()
     this.stream = null
-    this.catalogStream?.abort()
-    this.catalogStream = null
     this.streamBindingEpoch = ''
-    this.lastStreamSequence = 0
     this.patch({
       boards: [],
       boardsRevision: '',
@@ -1659,8 +1485,11 @@ export class CollaborationRuntime {
         try {
           entries = await runtime.ensureDirectory(req.query, req.signal)
         } catch (error) {
+          req.signal.throwIfAborted()
           runtime.showFailure(error)
-          throw error
+          const failure = runtime.store.getSnapshot().error
+          return [{name: failureLabel(failure ?? {code: 'loop-collaboration/internal', message: ''}),
+            section: 'Loop', value: 'directory-error'}]
         }
         return entries.map(entry => {
           const actions: string[] = []
@@ -1684,7 +1513,14 @@ export class CollaborationRuntime {
       warm: session => {
         void owner.forSession(session.sessionId).warm()
       },
-      onPick: pick => owner.forSession(pick.session.sessionId).pickCandidate(pick),
+      onPick: pick => {
+        const runtime = owner.forSession(pick.session.sessionId)
+        if (pick.candidate.value === 'directory-error') {
+          runtime.showDirectoryError()
+          return 'handled'
+        }
+        return runtime.pickCandidate(pick)
+      },
       openReference: (session, reference) => owner.forSession(session.sessionId).openReference(reference.ref),
     }
     return inputTriggers.registerSource(source)

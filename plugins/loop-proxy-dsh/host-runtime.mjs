@@ -1701,10 +1701,20 @@ export class LoopHostRuntime {
 
   async withSessionContext(sessionId, signal, operation) {
     return await this.withConnectionLease(signal, async () => {
-      const {context} = await this.ensureSessionContextLocked(sessionId, signal)
+      const {workspace, context} = await this.ensureSessionContextLocked(sessionId, signal)
       if (context.state !== "inherited") throw failure("loop-host/conflict", context.reason)
       // Lease-scoped identity for internal consumers; not part of the public Session context.
-      return await operation(context, [this.serviceBaseUrl, this.accountPrincipal, this.store.installationId])
+      const channelMembers = async cursor => {
+        const result = await this.actions.agentAction({
+          workspaceId: workspace.id, sessionId, accountPrincipal: this.accountPrincipal,
+          name: "channel.members", arguments: {channelId: context.defaultChannelId, limit: 100, ...(cursor ? {cursor} : {})},
+        }, signal)
+        if (result?.error || !result?.data?.data) {
+          throw failure("loop-host/waiting-for-access", result?.error?.message || "Loop did not return the current channel's members")
+        }
+        return result.data.data
+      }
+      return await operation(context, [this.serviceBaseUrl, this.accountPrincipal, this.store.installationId], channelMembers)
     })
   }
 

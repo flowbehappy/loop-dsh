@@ -1248,6 +1248,14 @@ window.__ModuleLoader__.load({
     }
     function collaborationFailureText(t, failure2) {
       switch (failure2.code) {
+        case "loop-host/waiting-for-access":
+          return t("collab.error.permission");
+        case "loop-host/needs-auth":
+        case "loop-host/revoked":
+          return t("collab.error.auth");
+        case "loop-host/timeout":
+        case "loop-host/backend-unavailable":
+          return t("collab.error.offline");
         case "loop-collaboration/cancelled":
           return t("collab.notice.intentDiscarded");
         case "loop-collaboration/human-disabled":
@@ -2195,7 +2203,7 @@ window.__ModuleLoader__.load({
       if (!value.startsWith(REFERENCE_PREFIX)) return null;
       try {
         const parsed = JSON.parse(decodeBase64(value.slice(REFERENCE_PREFIX.length)));
-        if (parsed.version !== 1 || typeof parsed.sessionId !== "string" || !ID2.test(parsed.sessionId) || typeof parsed.targetId !== "string" || !ID2.test(parsed.targetId) || parsed.targetType !== "agent" && parsed.targetType !== "human" || typeof parsed.stableRef !== "string" || parsed.stableRef === "" || parsed.stableRef.length > 512 || typeof parsed.displayName !== "string" || parsed.displayName.trim() === "" || parsed.displayName.length > 255 || typeof parsed.bindingRevision !== "string" || parsed.bindingRevision === "" || parsed.bindingRevision.length > 200) {
+        if (parsed.version !== 1 || typeof parsed.sessionId !== "string" || !ID2.test(parsed.sessionId) || typeof parsed.targetId !== "string" || !ID2.test(parsed.targetId) || parsed.targetType !== "agent" && parsed.targetType !== "human" || typeof parsed.stableRef !== "string" || parsed.stableRef === "" || parsed.stableRef.length > 512 || typeof parsed.displayName !== "string" || parsed.displayName.trim() === "" || parsed.displayName.length > 255 || parsed.directoryKey !== void 0 && (typeof parsed.directoryKey !== "string" || !ID2.test(parsed.directoryKey)) || (parsed.bindingRevision === void 0 ? !parsed.directoryKey : typeof parsed.bindingRevision !== "string" || !parsed.bindingRevision || parsed.bindingRevision.length > 200)) {
           return null;
         }
         return {
@@ -2205,7 +2213,8 @@ window.__ModuleLoader__.load({
           targetType: parsed.targetType,
           stableRef: parsed.stableRef,
           displayName: parsed.displayName,
-          bindingRevision: parsed.bindingRevision
+          ...parsed.bindingRevision === void 0 ? {} : { bindingRevision: parsed.bindingRevision },
+          ...parsed.directoryKey === void 0 ? {} : { directoryKey: parsed.directoryKey }
         };
       } catch {
         return null;
@@ -2215,7 +2224,8 @@ window.__ModuleLoader__.load({
       return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
     }
     function serializeCollaborationReference(reference) {
-      return `<loop-collaboration type="${reference.targetType}" target="${xmlAttribute(reference.targetId)}" ref="${xmlAttribute(reference.stableRef)}">${xmlAttribute(reference.displayName)}</loop-collaboration>`;
+      const directory = reference.directoryKey ? ` directory="${xmlAttribute(reference.directoryKey)}"` : "";
+      return `<loop-collaboration type="${reference.targetType}" target="${xmlAttribute(reference.targetId)}" ref="${xmlAttribute(reference.stableRef)}"${directory}>${xmlAttribute(reference.displayName)}</loop-collaboration>`;
     }
     async function collaborationDigest(value) {
       const digest = await globalThis.crypto.subtle.digest(
@@ -2263,19 +2273,6 @@ window.__ModuleLoader__.load({
       if (!result.ok) throw new CollaborationRuntimeError(result.error.code, result.error.message);
       return result.value;
     }
-    function collaborationDirectoryIdentity(sessionId, scope) {
-      return {
-        serverBaseUrl: scope.serverBaseUrl,
-        accountId: scope.accountId,
-        installationId: scope.installationId,
-        workspaceId: scope.workspaceId,
-        bindingId: scope.bindingId,
-        bindingRevision: scope.bindingRevision,
-        bindingEpoch: scope.bindingEpoch,
-        projectId: scope.projectId,
-        agentId: scope.coordinatorAgentId
-      };
-    }
     function requestMatchesText(request, tokens) {
       return tokens.length > 0 && tokens.every((token) => request.text.includes(token));
     }
@@ -2286,10 +2283,7 @@ window.__ModuleLoader__.load({
       face;
       unsubscribeSession;
       statusPromise = null;
-      workspaceBindingPromise = null;
       statusGeneration = 0;
-      directoryCache = null;
-      directoryCacheKey = "";
       batchBuilder = null;
       prepared = null;
       pendingRecovery = null;
@@ -2300,10 +2294,7 @@ window.__ModuleLoader__.load({
       continuationFailures = /* @__PURE__ */ new Map();
       openBindingTimer = null;
       seenEventIds = /* @__PURE__ */ new Set();
-      seenCatalogEventIds = /* @__PURE__ */ new Set();
-      lastStreamSequence = 0;
       stream = null;
-      catalogStream = null;
       streamBindingEpoch = "";
       disposed = false;
       constructor(sessionId, options) {
@@ -2333,15 +2324,9 @@ window.__ModuleLoader__.load({
         this.unsubscribeSession();
         this.stream?.abort();
         this.stream = null;
-        this.catalogStream?.abort();
-        this.catalogStream = null;
         this.streamBindingEpoch = "";
-        this.directoryCache?.reset();
-        this.directoryCache = null;
-        this.directoryCacheKey = "";
         this.continuationRequests.clear();
         this.continuationFailures.clear();
-        this.seenCatalogEventIds.clear();
         this.rejectShareConsent(new CollaborationRuntimeError(
           "loop-collaboration/cancelled",
           "The collaborator message was closed before confirmation."
@@ -2349,12 +2334,11 @@ window.__ModuleLoader__.load({
         this.store.set(INITIAL);
       }
       async warm() {
-        const status = await this.refreshStatus().catch(() => void 0);
-        if (status === void 0 || status.state !== "ready" && status.state !== "degraded") return;
-        this.startCatalogStream();
-        const controller = new AbortController();
-        await this.ensureDirectory("", controller.signal).catch(() => void 0);
+        await this.refreshStatus().catch(() => void 0);
       }
+      showDirectoryError = () => {
+        this.patch({ overlay: "details" });
+      };
       openDetails = async () => {
         this.patch({ overlay: "details", error: null, notice: null });
         await this.refreshStatus().catch(() => void 0);
@@ -2412,56 +2396,24 @@ window.__ModuleLoader__.load({
         this.statusPromise = task;
         return task;
       }
-      async currentStatus() {
-        const state = this.store.getSnapshot();
-        if (state.status !== null && state.screen !== "error" && ["ready", "degraded", "unbound", "needs-board"].includes(state.status.state)) return state.status;
-        return await this.refreshStatus();
-      }
       async ensureDirectory(query, signal, kinds = ["agent", "human"]) {
-        let status = await this.currentStatus();
         signal.throwIfAborted();
-        if (status.state === "needs-board" || status.state === "unbound") status = await this.bindWorkspaceChannel();
-        signal.throwIfAborted();
-        const scope = status.scope;
-        if (scope === void 0 || status.state !== "ready" && status.state !== "degraded") {
-          throw new CollaborationRuntimeError(
-            status.state === "needs-board" ? "loop-collaboration/not-bound" : `loop-collaboration/${status.state}`,
-            status.reason ?? "Choose a Loop board before mentioning collaborators."
-          );
-        }
-        this.startCatalogStream();
-        const identity = collaborationDirectoryIdentity(this.sessionId, scope);
-        const cacheKey = catalogScopeKey("collaborators", this.sessionId, identity) + JSON.stringify([...kinds].sort());
-        if (this.directoryCache === null || this.directoryCacheKey !== cacheKey) {
-          this.directoryCache = new InputCatalogCache(identity, async (_, fetchSignal) => ({
-            items: await this.readDirectoryGroups("", scope.bindingRevision, kinds, fetchSignal),
-            revision: scope.bindingRevision,
-            hasMore: false
-          }));
-          this.directoryCacheKey = cacheKey;
-        }
-        const cache = this.directoryCache;
         const name2 = query.trim();
-        const searched = name2 ? await this.readDirectoryGroups(name2, scope.bindingRevision, kinds, signal) : await cache.ensureLoaded(signal);
-        if (cache !== this.directoryCache) {
-          throw new CollaborationRuntimeError(
-            "loop-collaboration/binding-stale",
-            "Loop collaboration changed while the search was running."
-          );
-        }
-        return searched;
-      }
-      async readDirectoryGroups(query, revision, kinds, signal) {
+        let directoryKey;
         const groups = await Promise.all(kinds.map(async (kind) => {
           const entries = /* @__PURE__ */ new Map();
           const cursors = /* @__PURE__ */ new Set();
           let cursor;
           do {
-            const page = await this.fetchDirectory(query, signal, revision, [kind], cursor);
-            for (const entry of page.entries) {
-              if (entry.targetType === kind) entries.set(entry.targetId, entry);
+            const page = await this.fetchDirectory(name2, signal, [kind], cursor);
+            if (!page.cacheKey || directoryKey !== void 0 && page.cacheKey !== directoryKey) {
+              throw new CollaborationRuntimeError("loop-collaboration/binding-stale", "The Loop directory changed during search.");
             }
-            if (!query && kind === "human") break;
+            directoryKey = page.cacheKey;
+            for (const entry of page.entries) {
+              if (entry.targetType === kind && entry.visible) entries.set(entry.targetId, { ...entry, directoryKey });
+            }
+            if (!name2 && kind === "human") break;
             cursor = page.nextCursor || void 0;
             if (cursor && cursors.has(cursor)) {
               throw new CollaborationRuntimeError("loop-collaboration/server-unavailable", "The Loop directory repeated a page cursor.");
@@ -2472,46 +2424,17 @@ window.__ModuleLoader__.load({
         }));
         return groups.flat();
       }
-      invalidateDirectory() {
-        this.directoryCache?.invalidate();
-      }
-      async bindWorkspaceChannel() {
-        if (this.workspaceBindingPromise !== null) return await this.workspaceBindingPromise;
-        const task = (async () => {
-          const workspace = this.options.workspaceForSession(this.sessionId);
-          const remote = this.options.remote;
-          if (workspace === void 0 || remote.status === void 0 || remote.collaborationBind === void 0) {
-            return await this.currentStatus();
-          }
-          const binding = resultValue(await remote.status(workspace));
-          if (binding.state !== "active" || !binding.loop?.defaultChannelId || binding.loop.projectId || !binding.agent?.id) return await this.currentStatus();
-          if (this.disposed) return await this.currentStatus();
-          resultValue(await remote.collaborationBind({
-            sessionId: this.sessionId,
-            workspaceId: binding.loop.workspaceId,
-            boardId: binding.loop.defaultChannelId,
-            coordinatorAgentId: binding.agent.id,
-            shareScope: this.store.getSnapshot().shareScope
-          }));
-          return await this.refreshStatus(true);
-        })();
-        this.workspaceBindingPromise = task;
-        try {
-          return await task;
-        } finally {
-          if (this.workspaceBindingPromise === task) this.workspaceBindingPromise = null;
-        }
-      }
       candidateValue(entry) {
         const status = this.store.getSnapshot().status;
         const scope = status?.scope;
-        if (scope === void 0) return "";
+        if (!scope && !entry.directoryKey) return "";
         return JSON.stringify({
           targetId: entry.targetId,
           targetType: entry.targetType,
           stableRef: entry.stableRef,
           displayName: entry.displayName,
-          bindingRevision: scope.bindingRevision,
+          bindingRevision: scope?.bindingRevision || void 0,
+          directoryKey: entry.directoryKey,
           visible: entry.visible,
           delegable: entry.delegable,
           notifiable: entry.notifiable,
@@ -2529,7 +2452,7 @@ window.__ModuleLoader__.load({
         } catch {
           return void 0;
         }
-        if (typeof value.targetId !== "string" || value.targetType !== "agent" && value.targetType !== "human" || typeof value.stableRef !== "string" || typeof value.displayName !== "string" || typeof value.bindingRevision !== "string") return void 0;
+        if (typeof value.targetId !== "string" || value.targetType !== "agent" && value.targetType !== "human" || typeof value.stableRef !== "string" || typeof value.displayName !== "string" || typeof value.directoryKey !== "string" && typeof value.bindingRevision !== "string") return void 0;
         const reference = {
           version: 1,
           sessionId: this.sessionId,
@@ -2537,7 +2460,8 @@ window.__ModuleLoader__.load({
           targetType: value.targetType,
           stableRef: value.stableRef,
           displayName: value.displayName,
-          bindingRevision: value.bindingRevision
+          ...typeof value.bindingRevision === "string" ? { bindingRevision: value.bindingRevision } : {},
+          ...typeof value.directoryKey === "string" ? { directoryKey: value.directoryKey } : {}
         };
         const ref = encodeCollaborationReference(reference);
         return {
@@ -2558,50 +2482,62 @@ window.__ModuleLoader__.load({
             "This collaborator reference belongs to another Session. Select it again in this Session."
           );
         }
+        const token = serializeCollaborationReference(reference);
+        const share = this.store.getSnapshot().shareScope;
+        if (reference.directoryKey && share.scope === "task-description" && share.resourceRefs.length === 0) {
+          await this.verifyDirectoryMember(reference, signal);
+          return token;
+        }
         if (this.prepared !== null || this.pendingRecovery !== null) {
           throw new CollaborationRuntimeError(
             "loop-collaboration/intent-already-bound",
             "Another Loop collaborator message is still being linked. Wait, retry, or discard that pending intent."
           );
         }
-        const status = await this.refreshStatus();
-        signal.throwIfAborted();
-        const scope = status.scope;
-        if (scope === void 0 || status.state !== "ready" && status.state !== "degraded") {
-          throw new CollaborationRuntimeError("loop-collaboration/not-bound", "Choose a Loop board before sending.");
-        }
-        if (reference.bindingRevision !== scope.bindingRevision) {
-          throw new CollaborationRuntimeError(
-            "loop-collaboration/binding-stale",
-            "The Loop board changed. Remove this stale collaborator and select it again."
-          );
-        }
-        const token = serializeCollaborationReference(reference);
         const builder = this.batchBuilder ?? this.newBatchBuilder();
         if (!builder.targets.some((target) => target.targetId === reference.targetId && target.targetType === reference.targetType)) {
-          const intendedActions = reference.targetType === "agent" ? ["dispatch", "followup"] : ["dispatch", "followup"];
           builder.targets.push({
             targetId: reference.targetId,
             targetType: reference.targetType,
             stableRef: reference.stableRef,
-            intendedActions
+            intendedActions: ["dispatch", "followup"]
           });
           builder.tokens.push(token);
           builder.targetNames.push(reference.displayName);
         }
+        builder.routes.push(this.submissionRoute(reference, signal));
         await builder.ready;
-        signal.throwIfAborted();
-        let prepared;
         try {
-          prepared = await this.prepareBatch(builder, scope.bindingRevision, signal);
-        } catch (error) {
+          const routes = await Promise.all(builder.routes);
+          signal.throwIfAborted();
+          const scope = routes[0]?.scope;
+          if (routes.some((route) => route?.scope?.bindingId !== scope?.bindingId || route?.scope?.bindingRevision !== scope?.bindingRevision)) {
+            throw new CollaborationRuntimeError("loop-collaboration/binding-stale", "The selected collaborators belong to different routes.");
+          }
+          if (!scope) throw new CollaborationRuntimeError("loop-collaboration/not-bound", "Choose a Loop board before sharing.");
+          this.prepared = await this.prepareBatch(builder, scope.bindingRevision, signal);
+          this.patch({ pendingIntent: true });
+          return token;
+        } finally {
           if (this.batchBuilder === builder) this.batchBuilder = null;
-          throw error;
         }
-        this.prepared = prepared;
-        this.batchBuilder = null;
-        this.patch({ pendingIntent: true });
-        return token;
+      }
+      async verifyDirectoryMember(reference, signal) {
+        const page = await this.fetchDirectory(reference.targetId, signal, [reference.targetType]);
+        if (page.cacheKey !== reference.directoryKey || !page.entries.some((entry) => entry.visible && entry.targetId === reference.targetId && entry.targetType === reference.targetType && entry.stableRef === reference.stableRef)) {
+          throw new CollaborationRuntimeError("loop-collaboration/binding-stale", "The directory or collaborator changed. Select the collaborator again.");
+        }
+      }
+      async submissionRoute(reference, signal) {
+        if (reference.directoryKey) await this.verifyDirectoryMember(reference, signal);
+        const status = await this.refreshStatus();
+        if (!status.scope || status.state !== "ready" && status.state !== "degraded") {
+          throw new CollaborationRuntimeError("loop-collaboration/not-bound", "Choose a Loop board before sending.");
+        }
+        if (reference.bindingRevision !== status.scope.bindingRevision) {
+          throw new CollaborationRuntimeError("loop-collaboration/binding-stale", "The Loop board changed. Remove this stale collaborator and select it again.");
+        }
+        return status;
       }
       async bindBoard(boardId) {
         const state = this.store.getSnapshot();
@@ -2887,7 +2823,7 @@ window.__ModuleLoader__.load({
           release = resolve;
         });
         queueMicrotask(release);
-        const builder = { targets: [], tokens: [], targetNames: [], ready, prepared: null };
+        const builder = { routes: [], targets: [], tokens: [], targetNames: [], ready, prepared: null };
         this.batchBuilder = builder;
         return builder;
       }
@@ -3232,7 +3168,7 @@ window.__ModuleLoader__.load({
           await this.bindContinuation(failure2.request, failure2.continuationRef);
         }
       }
-      async fetchDirectory(query, signal, bindingRevision, kinds, cursor) {
+      async fetchDirectory(query, signal, kinds, cursor) {
         if (this.options.remote.collaborationDirectory === void 0) {
           throw new CollaborationRuntimeError(
             "loop-collaboration/capability-unsupported",
@@ -3243,7 +3179,6 @@ window.__ModuleLoader__.load({
           sessionId: this.sessionId,
           query: query.slice(0, 200),
           limit: 50,
-          bindingRevision,
           ...cursor === void 0 ? {} : { cursor },
           ...kinds === void 0 ? {} : { kinds }
         }, signal);
@@ -3259,7 +3194,6 @@ window.__ModuleLoader__.load({
         const controller = new AbortController();
         this.stream = controller;
         this.streamBindingEpoch = bindingKey;
-        this.lastStreamSequence = 0;
         void (async () => {
           try {
             for await (const frame of this.options.remote.collaborationEvents(
@@ -3286,62 +3220,6 @@ window.__ModuleLoader__.load({
           }
         })();
       }
-      startCatalogStream() {
-        if (this.catalogStream !== null || this.options.catalogEvents === void 0) return;
-        const controller = new AbortController();
-        this.catalogStream = controller;
-        void (async () => {
-          try {
-            for await (const frame of this.options.catalogEvents(this.sessionId, controller.signal)) {
-              if (controller.signal.aborted) break;
-              this.applyCatalogFrame(frame);
-            }
-          } catch (error) {
-            if (!controller.signal.aborted) {
-              this.invalidateDirectory();
-              this.patch({
-                screen: "error",
-                error: {
-                  code: "loop-collaboration/server-unavailable",
-                  message: error instanceof Error ? error.message : ""
-                }
-              });
-            }
-          } finally {
-            if (this.catalogStream === controller) {
-              this.catalogStream = null;
-              if (!controller.signal.aborted && !this.disposed) {
-                this.invalidateDirectory();
-              }
-            }
-          }
-        })();
-      }
-      applyCatalogFrame(frame) {
-        if (frame.type === "ready") {
-          if (frame.subscription.snapshotRequired || frame.subscription.state === "backoff" || frame.subscription.state === "revoked" || frame.subscription.state === "stopped") {
-            this.invalidateDirectory();
-          }
-          return;
-        }
-        const event = frame.event;
-        if (event.eventId !== "" && this.seenCatalogEventIds.has(event.eventId)) return;
-        if (event.eventId !== "") {
-          this.seenCatalogEventIds.add(event.eventId);
-          if (this.seenCatalogEventIds.size > 256) {
-            const oldest = this.seenCatalogEventIds.values().next().value;
-            if (oldest !== void 0) this.seenCatalogEventIds.delete(oldest);
-          }
-        }
-        if (event.kind === "subscription.changed") {
-          if (event.status?.snapshotRequired === true || event.status?.state === "backoff" || event.status?.state === "revoked" || event.status?.state === "stopped") {
-            this.invalidateDirectory();
-          }
-          return;
-        }
-        if (event.kind !== "directory.changed") return;
-        this.invalidateDirectory();
-      }
       applyFrame(frame) {
         if (frame.type === "ready") {
           this.patch({ status: frame.status ?? this.store.getSnapshot().status });
@@ -3351,10 +3229,6 @@ window.__ModuleLoader__.load({
           this.patch({ error: frame.error });
           return;
         }
-        if (this.lastStreamSequence > 0 && frame.sequence > this.lastStreamSequence + 1) {
-          this.invalidateDirectory();
-        }
-        this.lastStreamSequence = Math.max(this.lastStreamSequence, frame.sequence);
         if (this.seenEventIds.has(frame.event.eventId)) return;
         this.seenEventIds.add(frame.event.eventId);
         if (this.seenEventIds.size > 256) {
@@ -3383,10 +3257,7 @@ window.__ModuleLoader__.load({
           void this.refreshStatus().catch(() => void 0);
           return;
         }
-        if (frame.event.kind === "directory.changed") {
-          this.invalidateDirectory();
-          return;
-        }
+        if (frame.event.kind === "directory.changed") return;
         const current = this.store.getSnapshot().status;
         if (current === null) return;
         if (frame.event.worksite !== void 0) {
@@ -3416,23 +3287,15 @@ window.__ModuleLoader__.load({
           "loop-collaboration/binding-stale",
           "The Loop board changed during share review."
         ));
-        this.invalidateDirectory();
-        this.directoryCache?.reset();
-        this.directoryCache = null;
-        this.directoryCacheKey = "";
         this.prepared = null;
         this.batchBuilder = null;
         this.pendingRecovery = null;
         this.handledRequestIds.clear();
-        this.seenCatalogEventIds.clear();
         this.continuationRequests.clear();
         this.continuationFailures.clear();
         this.stream?.abort();
         this.stream = null;
-        this.catalogStream?.abort();
-        this.catalogStream = null;
         this.streamBindingEpoch = "";
-        this.lastStreamSequence = 0;
         this.patch({
           boards: [],
           boardsRevision: "",
@@ -3526,8 +3389,14 @@ window.__ModuleLoader__.load({
             try {
               entries = await runtime.ensureDirectory(req.query, req.signal);
             } catch (error) {
+              req.signal.throwIfAborted();
               runtime.showFailure(error);
-              throw error;
+              const failure2 = runtime.store.getSnapshot().error;
+              return [{
+                name: failureLabel(failure2 ?? { code: "loop-collaboration/internal", message: "" }),
+                section: "Loop",
+                value: "directory-error"
+              }];
             }
             return entries.map((entry) => {
               const actions = [];
@@ -3547,7 +3416,14 @@ window.__ModuleLoader__.load({
           warm: (session) => {
             void owner.forSession(session.sessionId).warm();
           },
-          onPick: (pick) => owner.forSession(pick.session.sessionId).pickCandidate(pick),
+          onPick: (pick) => {
+            const runtime = owner.forSession(pick.session.sessionId);
+            if (pick.candidate.value === "directory-error") {
+              runtime.showDirectoryError();
+              return "handled";
+            }
+            return runtime.pickCandidate(pick);
+          },
           openReference: (session, reference) => owner.forSession(session.sessionId).openReference(reference.ref)
         };
         return inputTriggers.registerSource(source);
@@ -3835,7 +3711,7 @@ window.__ModuleLoader__.load({
       id: "loop.reference-display",
       order: 20,
       match(text2, from) {
-        const references = /<loop-knowledge-ref>[A-Za-z0-9_-]{1,8192}<\/loop-knowledge-ref>|<loop-skill-ref>[A-Za-z0-9_-]{1,21845}<\/loop-skill-ref>|<loop-collaboration type="(?:agent|human)" target="[^"<>]{1,1200}" ref="[^"<>]{1,3072}">([^<]{1,1530})<\/loop-collaboration>/gu;
+        const references = /<loop-knowledge-ref>[A-Za-z0-9_-]{1,8192}<\/loop-knowledge-ref>|<loop-skill-ref>[A-Za-z0-9_-]{1,21845}<\/loop-skill-ref>|<loop-collaboration type="(?:agent|human)" target="[^"<>]{1,1200}" ref="[^"<>]{1,3072}"(?: directory="[A-Za-z0-9_.:-]{1,200}")?>([^<]{1,1530})<\/loop-collaboration>/gu;
         references.lastIndex = from;
         for (let match = references.exec(text2); match !== null; match = references.exec(text2)) {
           let knowledgeName;
@@ -5553,9 +5429,9 @@ window.__ModuleLoader__.load({
       "error.generic": "Loop reported a failure. Try again.",
       "collab.section.agents": "Loop agents",
       "collab.section.humans": "Loop colleagues",
-      "collab.candidate.delegate": "Can be assigned a task",
+      "collab.candidate.delegate": "Task candidate",
       "collab.candidate.notify": "Can be mentioned",
-      "collab.candidate.needsAccess": "Access required",
+      "collab.candidate.needsAccess": "Can be mentioned \xB7 Task access required",
       "collab.candidate.unavailable": "No collaboration action is available",
       "collab.status.unbound": "Connect Loop collaborators",
       "collab.status.needsAuth": "Sign in to use Loop collaborators",
@@ -5664,6 +5540,7 @@ window.__ModuleLoader__.load({
       "collab.notice.continuationFailed": "The reply was not linked to active Loop work. Normal chat was preserved.",
       "collab.error.notBound": "Choose a Loop board before mentioning collaborators.",
       "collab.error.humanDisabled": "Select a Loop Agent. Mentioning people is not supported yet.",
+      "collab.error.permission": "Loop denied this operation. Check the assistant\u2019s permissions in this workspace.",
       "collab.error.needsAccess": "This collaborator is visible but needs access or does not accept this action.",
       "collab.error.auth": "Sign in to Loop before using collaborators.",
       "collab.error.bindingStale": "The Loop board or authority changed. Remove stale references and select collaborators again.",
@@ -6080,9 +5957,9 @@ window.__ModuleLoader__.load({
       "error.generic": "Loop \u8FD4\u56DE\u4E86\u5931\u8D25\u7ED3\u679C\uFF0C\u8BF7\u91CD\u8BD5\u3002",
       "collab.section.agents": "Loop \u667A\u80FD\u4F53",
       "collab.section.humans": "Loop \u540C\u4E8B",
-      "collab.candidate.delegate": "\u53EF\u6307\u6D3E\u4EFB\u52A1",
+      "collab.candidate.delegate": "\u53EF\u4F5C\u4E3A\u4EFB\u52A1\u4EBA\u9009",
       "collab.candidate.notify": "\u53EF\u63D0\u53CA",
-      "collab.candidate.needsAccess": "\u9700\u8981\u8BBF\u95EE\u6743\u9650",
+      "collab.candidate.needsAccess": "\u53EF\u63D0\u53CA \xB7 \u6D3E\u5DE5\u9700\u8981\u6743\u9650",
       "collab.candidate.unavailable": "\u5F53\u524D\u6CA1\u6709\u53EF\u7528\u7684\u534F\u4F5C\u64CD\u4F5C",
       "collab.status.unbound": "\u8FDE\u63A5 Loop \u534F\u4F5C",
       "collab.status.needsAuth": "\u767B\u5F55\u540E\u4F7F\u7528 Loop \u534F\u4F5C",
@@ -6191,6 +6068,7 @@ window.__ModuleLoader__.load({
       "collab.notice.continuationFailed": "\u56DE\u590D\u672A\u5173\u8054\u5230\u8FDB\u884C\u4E2D\u7684 Loop \u5DE5\u4F5C\uFF0C\u666E\u901A\u804A\u5929\u5185\u5BB9\u5DF2\u4FDD\u7559\u3002",
       "collab.error.notBound": "\u63D0\u53CA\u534F\u4F5C\u8005\u524D\u8BF7\u5148\u9009\u62E9 Loop \u770B\u677F\u3002",
       "collab.error.humanDisabled": "\u8BF7\u9009\u62E9 Loop \u667A\u80FD\u4F53\uFF0C\u6682\u4E0D\u652F\u6301 @ \u4EBA\u7C7B\u6210\u5458\u3002",
+      "collab.error.permission": "Loop \u672A\u6388\u6743\u672C\u6B21\u64CD\u4F5C\u3002\u8BF7\u68C0\u67E5\u52A9\u624B\u5728\u5F53\u524D\u5DE5\u4F5C\u533A\u7684\u6743\u9650\u3002",
       "collab.error.needsAccess": "\u8BE5\u534F\u4F5C\u8005\u53EF\u89C1\uFF0C\u4F46\u9700\u8981\u51C6\u5165\u6216\u5F53\u524D\u4E0D\u63A5\u53D7\u6B64\u64CD\u4F5C\u3002",
       "collab.error.auth": "\u4F7F\u7528\u534F\u4F5C\u8005\u524D\u8BF7\u5148\u767B\u5F55 Loop\u3002",
       "collab.error.bindingStale": "Loop \u770B\u677F\u6216\u6743\u9650\u5DF2\u53D8\u5316\uFF0C\u8BF7\u5220\u9664\u5931\u6548\u5F15\u7528\u5E76\u91CD\u65B0\u9009\u62E9\u534F\u4F5C\u8005\u3002",
@@ -6288,9 +6166,9 @@ window.__ModuleLoader__.load({
       "upload.failed": "\u4E0A\u50B3\u5931\u6557",
       "upload.off": "\u5C1A\u672A\u767B\u5165 Loop",
       "collab.dialog.task": "\u5354\u4F5C\u4EFB\u52D9",
-      "collab.candidate.delegate": "\u53EF\u6307\u6D3E\u4EFB\u52D9",
+      "collab.candidate.delegate": "\u53EF\u4F5C\u70BA\u4EFB\u52D9\u4EBA\u9078",
       "collab.candidate.notify": "\u53EF\u63D0\u53CA",
-      "collab.candidate.needsAccess": "\u9700\u8981\u5B58\u53D6\u6B0A\u9650",
+      "collab.candidate.needsAccess": "\u53EF\u63D0\u53CA \xB7 \u6307\u6D3E\u4EFB\u52D9\u9700\u8981\u6B0A\u9650",
       "collab.error.humanDisabled": "\u6B64\u8F38\u5165\u6846\u50C5\u652F\u63F4 Loop \u667A\u6167\u9AD4\u3002\u8ACB\u79FB\u9664\u820A\u7684\u4EBA\u985E\u5F15\u7528\u4E26\u91CD\u65B0\u9078\u64C7 Loop \u667A\u6167\u9AD4\u3002",
       "slash.loopSkills": "Loop \xB7 \u6280\u80FD",
       "slash.loopKnowledge": "Loop \xB7 \u77E5\u8B58\u5EAB",
@@ -6497,9 +6375,9 @@ window.__ModuleLoader__.load({
       "upload.failed": "\u30A2\u30C3\u30D7\u30ED\u30FC\u30C9\u5931\u6557",
       "upload.off": "Loop \u306B\u672A\u30ED\u30B0\u30A4\u30F3",
       "collab.dialog.task": "\u5171\u540C\u4F5C\u696D\u30BF\u30B9\u30AF",
-      "collab.candidate.delegate": "\u30BF\u30B9\u30AF\u3092\u4F9D\u983C\u3067\u304D\u307E\u3059",
+      "collab.candidate.delegate": "\u30BF\u30B9\u30AF\u306E\u62C5\u5F53\u5019\u88DC",
       "collab.candidate.notify": "\u30E1\u30F3\u30B7\u30E7\u30F3\u3067\u304D\u307E\u3059",
-      "collab.candidate.needsAccess": "\u30A2\u30AF\u30BB\u30B9\u6A29\u304C\u5FC5\u8981\u3067\u3059",
+      "collab.candidate.needsAccess": "\u30E1\u30F3\u30B7\u30E7\u30F3\u53EF\u30FB\u4F9D\u983C\u306B\u306F\u6A29\u9650\u304C\u5FC5\u8981\u3067\u3059",
       "collab.error.humanDisabled": "\u3053\u306E\u5165\u529B\u6B04\u306F Loop \u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u306E\u307F\u306B\u5BFE\u5FDC\u3057\u3066\u3044\u307E\u3059\u3002\u53E4\u3044\u4EBA\u9593\u3078\u306E\u53C2\u7167\u3092\u524A\u9664\u3057\u3001Loop \u30A8\u30FC\u30B8\u30A7\u30F3\u30C8\u3092\u9078\u3073\u76F4\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
       "slash.loopSkills": "Loop \xB7 \u30B9\u30AD\u30EB",
       "slash.loopKnowledge": "Loop \xB7 \u30CA\u30EC\u30C3\u30B8",
@@ -9423,8 +9301,7 @@ window.__ModuleLoader__.load({
             return true;
           }
           return false;
-        },
-        ...remote.skillCatalogEvents === void 0 ? {} : { catalogEvents: (sessionId, signal) => skills.catalogEvents(sessionId, signal) }
+        }
       });
       const projectSync = new LoopProjectSyncController({
         remote,

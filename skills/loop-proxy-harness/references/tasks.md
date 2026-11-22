@@ -30,14 +30,19 @@ send only the intended fields. Report returned state, not assumed progress.
 
 Reading this guide exposes new dispatch tools for the current turn. Existing
 accepted Task management tools remain discoverable from persistent Host facts
-across turns and restart. An @ selection identifies an accepted target; it does not
+across turns and restart. An @ selection identifies a directory member; it does not
 create work, notify anyone, or prove channel membership.
 
-0. Confirm a task request in the user's instructions. Use an existing accepted
-   target, or resolve the named collaborators (or choose them when authorized)
-   from the directory and call `collaboration_prepare` with all exact targetIds.
+0. Confirm a task request in the user's instructions. For an ordinary @ mention use its exact targetId. For a named or
+   delegated choice resolve the member in the directory. Call
+   `collaboration_prepare` for the requested targets before dispatch unless
+   this turn already has an active collaboration intent.
    This binds the current user message through the Host; no manual @ is needed.
    Directory visibility or a cancelled question alone is not a task request.
+   Preparation checks Agent membership in the exact saved channel. A
+   `not-in-channel` result identifies missing Agents and creates no intent.
+   Explain the result and decide with the user whether to invite them.
+   If the roster cannot be read, report that membership could not be verified.
    Preparation shares only the task description and does not invite anyone.
 1. Resolve the exact bound channel from trusted Host context or an authorized
    read. Do not choose another channel to work around missing access.
@@ -47,7 +52,7 @@ create work, notify anyone, or prove channel membership.
    channel. It does not migrate saved project/account/server bindings. If this
    fails, report the concrete error; do not invent a rebind button or scan
    unrelated channels, Agents or workflows.
-2. Read that channel's members with the described `channel.members` action.
+2. A ready preparation has checked the selected Agents. For an older intent or a question about membership, read the channel's members with the described `channel.members` action.
    Follow pagination before concluding a member is absent. Match the selected
    target's exact identity. Directory visibility and
    `delegable` do not prove membership.
@@ -59,11 +64,14 @@ create work, notify anyone, or prove channel membership.
    If `actions channel.agent-add` returns no match, inspect its schema result
    and follow the specific permission recovery in [recovery.md](recovery.md);
    an empty filtered catalog does not mean invitations are unsupported.
-4. Confirm membership, then call `collaboration_dispatch` with exactly one
+4. After an invitation, retry preparation to confirm membership, then call `collaboration_dispatch` with exactly one
    `tasks: [{title, description, assignee}]` item. Use the directory's **memberId**
    for assignee. The Host supplies the bound channel and creates AND assigns the
    Task. Do not create a second Task with `task.create` first. A requested project
-   must match the Host binding.
+   must match the Host binding. If a confirmed member cannot be assigned, check
+   task visibility and the returned access decision. An existing member does
+   not need another invitation. Changing who can see the channel or Task
+   requires its own authorization.
 
 For existing work, keep the exact Task ID from `receipt.taskId`:
 

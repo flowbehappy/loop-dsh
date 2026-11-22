@@ -215,10 +215,6 @@ export function applyLoopUi(ctx: ClientContext, remote: LoopHostClient): void {
       }
       return false
     },
-    ...(remote.skillCatalogEvents === undefined
-      ? {}
-      : {catalogEvents: (sessionId: string, signal: AbortSignal) =>
-          skills.catalogEvents(sessionId, signal)}),
   })
   const projectSync = new LoopProjectSyncController({
     remote,

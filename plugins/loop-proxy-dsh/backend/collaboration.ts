@@ -38,7 +38,7 @@ export class CollaborationService {
     if(!id(session))throw new LoopError("loop-host/invalid-request","Invalid Host Session")
     const credential=await this.api.tokens.credential(signal)
     const namespace:CollaborationNamespace={serverBaseUrl:this.credentials.server,accountId:credential.principal_id,installationId:this.installation,workspaceId:credential.workspace_id,hostSessionId:session}
-    return {namespace,hasDeviceCredential:!!credential.device_credential}
+    return {namespace,grantId:credential.grant_id,hasDeviceCredential:!!credential.device_credential}
   }
   async namespace(session:string,signal?:AbortSignal):Promise<CollaborationNamespace>{
     return (await this.sessionContext(session,signal)).namespace
@@ -364,9 +364,9 @@ export class CollaborationService {
     return {state:"not-dispatched",receipt}
   }
   async directory(input:any,signal?:AbortSignal){
-    const namespace=await this.namespace(input.sessionId,signal),query=this.query(input)
+    const {namespace,grantId}=await this.sessionContext(input.sessionId,signal),query=this.query(input)
     if(input.kinds?.length===1){if(!["agent","human"].includes(input.kinds[0]))throw new LoopError("loop-host/invalid-request","Invalid directory kind");query.set("kind",input.kinds[0])}
-    const result=await this.api.request("workspace","GET","/collaboration/directory?"+query,undefined,signal,{lossless:true})
+    const result=await this.api.request("workspace","GET","/collaboration/directory?"+query,undefined,signal,{lossless:true,expectedGrantId:grantId})
     if(!Array.isArray(result?.items)||result.items.length>200)throw new LoopError("loop-host/backend-invalid","Invalid collaboration directory")
     const entries=result.items.map((item:any)=>{
       const kind=item.kind||item.targetType,target=item.targetId||item.memberId,caps=item.capabilities??item
@@ -375,6 +375,6 @@ export class CollaborationService {
         capability:{available:item.visible===true,assignable:caps.assign===true,execute:caps.execute===true,delegable:item.delegable===true&&caps.execute===true,notifiable:item.notifiable===true,conditionalNotify:item.notifiable===true,followup:caps.followup===true,cancel:caps.cancel===true,reason:text(item.unsupportedReason)},projectId:text(item.projectId),projectName:text(item.projectName),workspaceName:text(item.workspaceName),revision:revision(item.revision??result.revision),staleReason:text(item.unsupportedReason),...(kind==="agent" && item.agentId?{agentId:item.agentId,...(item.mention?{mention:item.mention}:{})}:{})}
     })
     return {entries,items:entries,groups:{agent:entries.filter((entry:any)=>entry.targetType==="agent"),human:entries.filter((entry:any)=>entry.targetType==="human")},nextCursor:result.nextCursor??"",revision:revision(result.revision),freshness:"live",truncated:result.hasMore===true,needsAccessCount:entries.filter((item:any)=>item.needsAccess).length,
-      cacheKey:"dsh-"+hash([namespace.serverBaseUrl,namespace.accountId,namespace.installationId,namespace.workspaceId,namespace.hostSessionId].join("\0")).slice(0,36)}
+      cacheKey:"dsh-"+hash([namespace.serverBaseUrl,namespace.accountId,namespace.installationId,namespace.workspaceId,namespace.hostSessionId,grantId].join("\0")).slice(0,36)}
   }
 }
