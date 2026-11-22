@@ -460,6 +460,11 @@ export class LoopHostRuntime {
               else skipped++
               continue
             }
+            // Import local folders only. A saved Loop project already has its own destination.
+            if (existing?.projectId) {
+              skipped++
+              continue
+            }
             if (existingBindingsOnly) {
               if (!existing && options.expectedGrantId && this.actions.checkWorkspaceBinding) {
                 let nativeTarget
@@ -1054,7 +1059,7 @@ export class LoopHostRuntime {
           state: "needs_auth",
           bindingRevision: savedWithoutCurrentAccount.bindingRevision,
           projectId: savedWithoutCurrentAccount.projectId,
-          defaultChannelId: savedWithoutCurrentAccount.defaultChannelId,
+          defaultChannelId: savedWithoutCurrentAccount.projectId ? "" : savedWithoutCurrentAccount.defaultChannelId,
           reason: "This Session keeps its original Loop server and project context",
         }
       }
@@ -1091,7 +1096,7 @@ export class LoopHostRuntime {
       state: current ? "inherited" : "blocked",
       bindingRevision: current ? binding.revision : record.bindingRevision,
       projectId: record.projectId,
-      defaultChannelId: record.defaultChannelId,
+      defaultChannelId: record.projectId ? "" : record.defaultChannelId,
       ...(current ? {agent: {id: binding.agentId, displayName: binding.agentName}, loopWorkspaceId: binding.loopWorkspaceId} : {}),
       ...(current ? {} : {
         reason: sessionServer === ""
@@ -1132,7 +1137,7 @@ export class LoopHostRuntime {
       }
       record = await this.captureSession(workspace.id, sessionId)
     }
-    if (record === null || record.syncEnabled !== true) return null
+    if (record === null || record.syncEnabled !== true || !record.defaultChannelId) return null
     const sessionServer = record.loopServiceBaseUrl ?? ""
     if (sessionServer === "" ||
         (this.serviceBaseUrl !== "" && sessionServer !== this.serviceBaseUrl)) {
@@ -1335,6 +1340,9 @@ export class LoopHostRuntime {
     const sessionRecord = await this.store.getSession(
       this.accountPrincipal, request.workspaceId, request.sessionId,
     )
+    if (request.enabled && !sessionRecord?.defaultChannelId) {
+      throw failure("loop-host/conflict", "This Session has no upload channel. Binding a project does not select one.")
+    }
     const binding = sessionRecord === null
       ? null
       : await this.store.getBinding(
@@ -1351,7 +1359,7 @@ export class LoopHostRuntime {
       ...request,
       accountPrincipal: this.accountPrincipal,
       ...(sourceSequence === undefined ? {} : {confirmedSourceSequence: sourceSequence}),
-      context: syncContext({...context, agentId: binding?.agentId}),
+      context: syncContext({...context, defaultChannelId: sessionRecord?.defaultChannelId ?? "", agentId: binding?.agentId}),
     }, signal))
     if (!request.enabled || (sync.state !== "needs_auth" && sync.state !== "off")) {
       try {

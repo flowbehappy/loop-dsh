@@ -186,6 +186,8 @@ for(const failure of ['none','create-response','execute-response','model-respons
     const projectId=created.data.data.project.id
     const bound=await facade.completeBind({workspace:localWorkspace,challengeId:selection.challenge.id,projectId,agentId:assistant.agentId})
     assert.equal(bound.binding.projectId,projectId)
+    assert.equal(bound.binding.defaultChannelId,'')
+    await assert.rejects(facade.prepareProjectSync({workspace:localWorkspace,agentId:assistant.agentId,localWorkspace:true}),{code:'loop-host/conflict'})
     const models=base+'/api/v1/external-model/workspaces/'+workspace+'/models'
     const sync=base+'/api/v1/host-sync/grant'
     assert.equal(await status(models,credential.access_token),200)

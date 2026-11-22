@@ -103,7 +103,7 @@ test("project-only bindings preserve context without a channel or automatic sync
       workspacePath: WORKSPACE,
       workspaceTitle: "project-context",
       expectedRevision: null,
-      target: target({defaultChannelId: undefined}),
+      target: target({defaultChannelId: CHANNEL_ID}),
     })
     assert.equal(binding.projectId, PROJECT_ID)
     assert.equal(binding.defaultChannelId, "")
@@ -116,6 +116,19 @@ test("project-only bindings preserve context without a channel or automatic sync
     assert.equal(session.projectId, PROJECT_ID)
     assert.equal(session.syncEnabled, false)
     assert.equal(session.syncPreference, "off")
+    // Earlier plugin versions persisted the project channel on both records.
+    await rewriteAccountState(root, state => {
+      Object.values(state.bindings)[0].defaultChannelId = CHANNEL_ID
+      Object.assign(state.sessions[session.sessionId], {defaultChannelId:CHANNEL_ID, syncEnabled:true, syncPreference:"project_default"})
+    })
+    const reloaded = await store.getBinding("account-one",WORKSPACE_ID,WORKSPACE)
+    assert.equal(reloaded.defaultChannelId,"")
+    const saved = await store.getSession("account-one",WORKSPACE_ID,session.sessionId)
+    assert.deepEqual([saved.defaultChannelId,saved.syncEnabled,saved.syncPreference],["",false,"off"])
+    const next = await store.captureSession("account-one",{
+      workspaceId:WORKSPACE_ID,sessionId:"after-upgrade",sessionCreatedAt:Date.parse(binding.boundAt),binding:reloaded,
+    })
+    assert.deepEqual([next.projectId,next.defaultChannelId,next.syncEnabled],[PROJECT_ID,"",false])
     await assert.rejects(store.putBinding("account-one", {
       workspaceId: "ws_channel",
       workspacePath: WORKSPACE,
@@ -313,7 +326,7 @@ test("new Sessions inherit once and old Sessions remain on their original target
     const inherited = await runtime.sessionContext({workspaceId: WORKSPACE_ID, sessionId: "session-new"})
     assert.equal(inherited.state, "inherited")
     assert.equal(inherited.projectId, PROJECT_ID)
-    assert.equal(inherited.defaultChannelId, CHANNEL_ID)
+    assert.equal(inherited.defaultChannelId, "")
 
     now += 10_000
     const binding = await store.getBinding("account-one", WORKSPACE_ID, WORKSPACE)
@@ -1075,6 +1088,10 @@ test("Workspace unbind forwards shared-authorization and Session cleanup facts",
       ["session-b", {header: {createdAt: Date.parse(bindingB.boundAt)}}],
       ["session-b-new", {header: {createdAt: Date.parse(bindingB.updatedAt)}}],
     ])
+    await rewriteAccountState(root, state => {
+      // This historical Session had explicitly enabled an upload to this channel.
+      Object.assign(state.sessions["session-b"], {defaultChannelId: CHANNEL_ID, syncPreference: "on", syncEnabled: true})
+    })
     const actions = {
       currentSyncProfile() {
         return "account-sync"
@@ -1448,7 +1465,7 @@ test("sync actions forward only the helper's project and channel context", async
     const syncInputs = []
     const actions = {
       async beginBind() {
-        return {state: "active", binding: target()}
+        return {state: "active", binding: target({placementKind: "channel_session"})}
       },
       async syncStatus(input) {
         contexts.push(input.context)
@@ -1489,10 +1506,10 @@ test("sync actions forward only the helper's project and channel context", async
     await runtime.setSync({...request, enabled: true})
     await runtime.retrySync(request)
     assert.deepEqual(contexts, [
-      {projectId: PROJECT_ID, defaultChannelId: CHANNEL_ID, agentId: AGENT_ID},
-      {projectId: PROJECT_ID, defaultChannelId: CHANNEL_ID, agentId: AGENT_ID},
-      {projectId: PROJECT_ID, defaultChannelId: CHANNEL_ID, agentId: AGENT_ID},
-      {projectId: PROJECT_ID, defaultChannelId: CHANNEL_ID, agentId: undefined},
+      {projectId: "", defaultChannelId: CHANNEL_ID, agentId: AGENT_ID},
+      {projectId: "", defaultChannelId: CHANNEL_ID, agentId: AGENT_ID},
+      {projectId: "", defaultChannelId: CHANNEL_ID, agentId: AGENT_ID},
+      {projectId: "", defaultChannelId: CHANNEL_ID, agentId: undefined},
     ])
     assert.deepEqual(syncInputs.map(input => input.confirmedSourceSequence), [undefined, undefined, 42])
   } finally {
@@ -1563,7 +1580,7 @@ test("first sync admission captures a Session missed by the created hook", async
           return "account-sync"
         },
         async beginBind() {
-          return {state: "active", binding: target()}
+          return {state: "active", binding: target({placementKind: "channel_session"})}
         },
         async setSync(input) {
           syncInputs.push(structuredClone(input))
@@ -1580,7 +1597,7 @@ test("first sync admission captures a Session missed by the created hook", async
 
     assert.equal(await runtime.sessionSyncEnabled("session-admission"), true)
     const record = await store.getSession("account-one", WORKSPACE_ID, "session-admission")
-    assert.equal(record.projectId, PROJECT_ID)
+    assert.equal(record.projectId, "")
     assert.equal(record.defaultChannelId, CHANNEL_ID)
     assert.equal(record.syncPreference, "project_default")
     assert.equal(syncInputs[0].confirmedSourceSequence, 0)
@@ -1613,7 +1630,7 @@ test("live sync gating defaults on for new Sessions, respects opt-out, and requi
           return "account-sync"
         },
         async beginBind() {
-          return {state: "active", binding: target()}
+          return {state: "active", binding: target({placementKind: "channel_session"})}
         },
         async setSync(input) {
           return {
@@ -1648,7 +1665,7 @@ test("live sync gating defaults on for new Sessions, respects opt-out, and requi
     assert.equal(await runtime.sessionSyncEnabled("session-gated"), true)
     assert.equal(syncInputs[0].confirmedSourceSequence, 0)
     assert.deepEqual(syncInputs[0].context, {
-      projectId: PROJECT_ID,
+      projectId: "",
       defaultChannelId: CHANNEL_ID,
       agentId: AGENT_ID,
     })
@@ -1724,7 +1741,7 @@ test("a sync authorization challenge preserves automatic intent without claiming
           return "account-sync"
         },
         async beginBind() {
-          return {state: "active", binding: target()}
+          return {state: "active", binding: target({placementKind: "channel_session"})}
         },
         async setSync() {
           return {
@@ -2230,6 +2247,9 @@ test("legacy Session and binding resolve only from their unique matching revisio
     await rewriteAccountState(root, state => {
       const legacyKey = Object.keys(state.bindings).find(key =>
         state.bindings[key].revision === bindingA.revision)
+      // Historical sessions explicitly enabled for upload keep their recorded destinations.
+      for (const binding of Object.values(state.bindings)) binding.defaultChannelId = CHANNEL_ID
+      for (const session of Object.values(state.sessions)) session.defaultChannelId = CHANNEL_ID
       delete state.bindings[legacyKey].loopServiceBaseUrl
       delete state.sessions["session-legacy"].loopServiceBaseUrl
     })
@@ -2497,6 +2517,7 @@ test("global server changes persist atomically and isolate bindings and Sessions
     assert.equal(first.binding.loop.serviceBaseUrl, serverOne)
 
     await runtime.captureSession(WORKSPACE_ID, "session-server-one")
+    await rewriteAccountState(root, state => { state.sessions["session-server-one"].defaultChannelId = CHANNEL_ID })
     await store.setSessionSync("account-one", WORKSPACE_ID, "session-server-one", true)
     const configured = await runtime.configureGlobalServer({serverUrl: serverTwo})
     assert.equal(configured.serverUrl, serverTwo)
@@ -2539,6 +2560,7 @@ test("global server changes persist atomically and isolate bindings and Sessions
       "proj_server_two",
     )
     await runtime.captureSession(WORKSPACE_ID, "session-server-two")
+    await rewriteAccountState(root, state => { state.sessions["session-server-two"].defaultChannelId = CHANNEL_ID })
     await store.setSessionSync("account-one", WORKSPACE_ID, "session-server-two", true)
     assert.deepEqual(
       await runtime.sessionSyncTarget("session-server-two"),

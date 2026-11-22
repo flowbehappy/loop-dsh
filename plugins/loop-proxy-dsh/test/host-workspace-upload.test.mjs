@@ -45,6 +45,21 @@ async function fixture(t) {
   return {root, store, workspace, sessions, prepared, uploaded, actions, runtime}
 }
 
+test('workspace discovery keeps a bound project without creating a recording channel', async t => {
+  const {runtime,store,workspace,prepared} = await fixture(t)
+  const original = await store.getBinding('human',workspace.id,workspace.path,server)
+  const project = await store.putBinding('human',{
+    workspaceId:workspace.id,workspacePath:workspace.path,workspaceTitle:workspace.title,expectedRevision:original.revision,
+    target:{...original,placementKind:undefined,projectId:'project-one',projectName:'Project',defaultChannelId:''},
+  })
+  const count = prepared.length
+  await runtime.syncProjects({},undefined,{background:true})
+  await runtime.syncProjects({})
+  assert.equal(prepared.length,count)
+  const saved = await store.getBinding('human',workspace.id,workspace.path,server)
+  assert.deepEqual([saved.revision,saved.projectId,saved.defaultChannelId],[project.revision,'project-one',''])
+})
+
 test('Human dispatch pins verified Loop identity and defaults writes to read-only', async t => {
   const {actions, runtime, prepared} = await fixture(t)
   const before = prepared.length

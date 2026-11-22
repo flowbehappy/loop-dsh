@@ -224,6 +224,7 @@ export class SyncControl {
     return file.transaction(async(record,save)=>{
       if(disconnecting(record))throw new LoopError("loop-host/conflict","Workspace disconnect is pending")
       const previous=this.checkedTarget(record,credential)
+      if(previous?.projectId)throw new LoopError("loop-host/conflict","This Workspace is already bound to a Loop project")
       const channelId=await this.ensureLocalChannel(workspace,signal)
       if(previous?.placementKind==="channel_session" && (previous.defaultChannelId!==channelId || previous.agentId!==agentId))throw new LoopError("loop-host/conflict","Saved Workspace channel or Agent changed")
       const target={placementKind:"channel_session",loopServiceBaseUrl:this.options.server,loopWorkspaceId:credential.workspace_id,loopWorkspaceName:credential.workspace_id,

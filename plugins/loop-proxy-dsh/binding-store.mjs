@@ -66,7 +66,7 @@ function publicBinding(record, defaultServiceBaseUrl = "") {
     placementKind: record.placementKind,
     projectId: record.projectId,
     projectName: record.projectName,
-    defaultChannelId: record.defaultChannelId,
+    defaultChannelId: record.projectId ? "" : record.defaultChannelId,
     agentId: record.agentId,
     agentName: record.agentName,
     accountName: record.accountName,
@@ -82,6 +82,14 @@ function publicSession(record, serviceBaseUrl) {
   if (record === undefined) return null
   return structuredClone({
     ...record,
+    ...(record.legacyBinding?.projectId && record.legacyBinding.defaultChannelId
+      ? {legacyBinding: {...record.legacyBinding, defaultChannelId: ""}}
+      : {}),
+    // Old project-default records described an inherited destination. Only a
+    // per-Session opt-in can retain that destination for an existing upload.
+    ...(record.projectId && record.syncPreference !== "on"
+      ? {defaultChannelId: "", syncEnabled: false, syncPreference: "off"}
+      : {}),
     ...(serviceBaseUrl === "" ? {} : {loopServiceBaseUrl: serviceBaseUrl}),
   })
 }
@@ -99,7 +107,6 @@ function publicManagedProject(record) {
     workspacePath: record.workspacePath,
     workspaceTitle: record.workspaceTitle,
     ...(record.bindingRevision === "" ? {} : {bindingRevision: record.bindingRevision}),
-    ...(record.defaultChannelId === "" ? {} : {defaultChannelId: record.defaultChannelId}),
     state: record.state,
     ...(record.reason === "" ? {} : {reason: record.reason}),
     updatedAt: record.updatedAt,
@@ -584,9 +591,7 @@ export class BindingStore {
       bindingRevision: input.bindingRevision === undefined
         ? ""
         : assertRevision(input.bindingRevision),
-      defaultChannelId: input.defaultChannelId === undefined
-        ? ""
-        : assertID(input.defaultChannelId, "default channel id"),
+      defaultChannelId: "",
       state: ["pending", "synced", "error", "workspace_missing"].includes(input.state)
         ? input.state
         : (() => { throw invalid("managed project state is invalid") })(),
@@ -1224,6 +1229,7 @@ export class BindingStore {
       if (active?.repairPending) return null
       if (active?.captureAfter !== undefined && (active.revision !== input.binding.revision ||
           !(input.sessionCreatedAt > Date.parse(active.captureAfter)))) return null
+      const channelId = input.binding.placementKind === "channel_session" ? input.binding.defaultChannelId : ""
       const record = {
         sessionId,
         workspaceId,
@@ -1233,10 +1239,10 @@ export class BindingStore {
         loopWorkspaceId: input.binding.loopWorkspaceId,
         placementKind: input.binding.placementKind,
         projectId: input.binding.projectId,
-        defaultChannelId: input.binding.defaultChannelId,
+        defaultChannelId: channelId,
         boundAt: this.now().toISOString(),
-        syncEnabled: Boolean(input.binding.defaultChannelId),
-        syncPreference: input.binding.defaultChannelId ? "project_default" : "off",
+        syncEnabled: Boolean(channelId),
+        syncPreference: channelId ? "project_default" : "off",
       }
       state.sessions[sessionId] = record
       await this.writeAccount(accountPrincipal, state)
@@ -1414,8 +1420,7 @@ function validateTarget(target) {
     ...(target.placementKind === "channel_session" ? {placementKind: "channel_session"} : {}),
     projectId: target.placementKind === "channel_session" ? "" : assertID(target.projectId, "project id"),
     projectName: target.placementKind === "channel_session" ? "" : boundedText(target.projectName, 255, "project name"),
-    // Legacy field also carries an explicit Host workspace destination.
-    defaultChannelId: target.placementKind === "channel_session" || target.defaultChannelId
+    defaultChannelId: target.placementKind === "channel_session"
       ? assertID(target.defaultChannelId, "channel id") : "",
     agentId: assertID(target.agentId, "agent id"),
     agentName: boundedText(target.agentName, 255, "agent name"),
@@ -1484,6 +1489,7 @@ function sameTarget(left, right, defaultServiceBaseUrl) {
       if (resolvedBindingServer(left, defaultServiceBaseUrl) !== serviceBaseURL(right[key])) return false
       continue
     }
+    if (key === "defaultChannelId" && left.projectId && right.projectId) continue
     if (left[key] !== right[key]) return false
   }
   return true
