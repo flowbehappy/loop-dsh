@@ -67,6 +67,17 @@ test('Human dispatch pins verified Loop identity and defaults writes to read-onl
   assert.equal(calls.length, 2)
 })
 
+test('history counts only messages and identified authors on the returned page', async t => {
+  const {actions, runtime} = await fixture(t)
+  const messages = ['a','a','b'].map(memberId => ({author:{memberId,displayName:'Same name'}}))
+  actions.humanAction = async () => ({data:{data:{messages,hasMore:true}}})
+  const command = {principal:'human',connection:'business',verb:'call',name:'message.history',input:'{"target":"#eng"}'}
+  const read = async () => JSON.parse((await runtime.humanCommand('old-session',command,undefined,()=>true)).output)
+  assert.deepEqual((await read()).historyScope,{viewer:'human',messagesOnPage:3,distinctAuthorsOnPage:2})
+  messages.push({author:{displayName:'Same name'}})
+  assert.deepEqual((await read()).historyScope,{viewer:'human',messagesOnPage:4})
+})
+
 test('login discovers local workspaces; both stored and new sessions upload with no Project choice', async t => {
   const value = await fixture(t)
   assert.equal(value.prepared.length, 1)

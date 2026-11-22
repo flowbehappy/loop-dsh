@@ -11,7 +11,11 @@ import {promisify} from 'node:util'
 import {setTimeout as delay} from 'node:timers/promises'
 const exec=promisify(execFile),runtime=process.env.LOOP_TS_E2E_DSH_BIN,base=process.env.LOOP_TS_E2E_BASE_URL,worksiteParent=process.env.LOOP_TS_E2E_WORKSITE_PARENT
 
-for(const method of ['browser','access-token'])test('packaged plugin signs in and runs a persisted official DSH session: '+method,{skip:!runtime || method==='access-token' && !base,timeout:90000},async t=>{
+// The extended browser journey runs multiple bounded model turns before checking sync.
+const extendedJourney = ['LOOP_TS_E2E_BUSINESS','LOOP_TS_E2E_CHANNEL'].some(key => process.env[key] === '1')
+const probeTimeout = method => method === 'browser' && extendedJourney ? 180000 : 60000
+
+for(const method of ['browser','access-token'])test('packaged plugin signs in and runs a persisted official DSH session: '+method,{skip:!runtime || method==='access-token' && !base,timeout:probeTimeout(method) + 30000},async t=>{
   assert.ok(isAbsolute(runtime),'supply an explicitly isolated official DSH bin.js')
   if(base)assert.ok(['127.0.0.1','localhost'].includes(new URL(base).hostname),'real Loop must be an explicitly isolated loopback Test Hub')
   const root=await mkdtemp(join(tmpdir(),'loop-native-dsh-')),home=join(root,'home'),workspace=join(root,'workspace')
@@ -238,7 +242,8 @@ export async function apply(ctx){
   exit=new Promise(resolve=>child.once('exit',resolve))
   for(const stream of [child.stdout,child.stderr])stream.on('data',chunk=>{log=(log+chunk).slice(-100000)})
   let result
-  for(let i=0;i<600;i++){
+  const deadline = Date.now() + probeTimeout(method)
+  while(Date.now() < deadline){
     try{result=JSON.parse(await readFile(output,'utf8'));break}catch(error){if(error.code!=='ENOENT')throw error}
     if(child.exitCode!==null)break
     await delay(100)

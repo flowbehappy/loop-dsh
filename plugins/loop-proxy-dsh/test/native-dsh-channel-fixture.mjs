@@ -113,6 +113,8 @@ export async function prepareChannelJourney(api, workspace, service, sessionId, 
         }else if(s.text){
           assert.ok(previous.includes(s.text),'Missing selected channel content: '+previous.slice(-700))
           assert.ok(previous.includes(s.id),'Missing verified target ID')
+          assert.ok(previous.includes('distinctAuthorsOnPage'),'History must count visible authors separately from messages')
+          assert.equal(previous.includes('This page cannot establish who else spoke'),s.id===fallback,'History must identify the reader')
           if(s.text!==other)assert.ok(!previous.includes(other))
         }else{
           assert.match(previous,s.expect)

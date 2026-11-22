@@ -1610,7 +1610,7 @@ export class LoopHostRuntime {
         if (result === null || typeof result !== "object" || (!Object.hasOwn(result, "data") && !result.error)) {
           throw failure("loop-host/backend-invalid", "Loop Human action result is invalid")
         }
-        return {failed: Boolean(result.error), output: boundedJSON(result)}
+        return {failed: Boolean(result.error), output: boundedJSON(name === "message.history" ? historyResult(result, "human") : result)}
       }
       throw failure("loop-host/invalid-request", "Loop Human command is invalid")
     })
@@ -1818,8 +1818,7 @@ export class LoopHostRuntime {
       const webUrl = !result.error && resultWebUrl(command.name, result.data?.data, this.serviceBaseUrl, loopWorkspaceId)
       return {
         failed: Boolean(result.error),
-        output: boundedJSON(command.name === "message.history" && !result.error ? {...result,
-          visibility:"Messages visible to this Agent only. Other participants may see additional messages, even when hasMore is false."}
+        output: boundedJSON(command.name === "message.history" ? historyResult(result, "agent")
           : webUrl ? {...result, webUrl} : result),
       }
     }
@@ -2133,6 +2132,20 @@ function validateSyncStatus(sync) {
     validateChallenge(sync.challenge)
   }
   return sync
+}
+
+function historyResult(result, viewer) {
+  const messages = result.data?.data?.messages
+  if (result.error || !Array.isArray(messages)) return result
+  const authorIds = messages.map(message => message?.author?.memberId)
+  const historyScope = {viewer, messagesOnPage:messages.length}
+  if (authorIds.every(id => typeof id === "string" && id.length > 0)) {
+    historyScope.distinctAuthorsOnPage = new Set(authorIds).size
+  }
+  const visibility = viewer === "agent"
+    ? "Start with the scope of the summary, e.g. 从助手可见的消息看…. This page cannot establish who else spoke. Use the user's authorized view to verify."
+    : "These messages are visible to the authorizing user. Counts describe this returned page."
+  return {historyScope, visibility, ...result}
 }
 
 function boundedJSON(value) {

@@ -99,7 +99,7 @@ export default class LoopHostService extends TypertRemoteService {
       channelName,assignee:{type:"string",required:true,description:"Exact Loop member ID of the requested assignee."},
       title:{type:"string",required:true},description:{type:"string"},
     },({channelName,...task})=>["task.create",{channelName,tasks:[task]}])
-    registerActionTool("loop_channel_history","Read or summarize messages in a named Loop channel. The Agent may see only some participants. For the user's own view or a complete summary from their perspective choose readAs=human, which requests single-channel read-only access.",{
+    registerActionTool("loop_channel_history","Read or summarize messages in a named Loop channel. For an ordinary summary, report only the speakers and messages visible to this assistant. Other speakers may be hidden. For verification from the user's perspective choose readAs=human to request single-channel read-only access.",{
       channelName,readAs:{type:"string",enum:["agent","human"]},limit:{type:"integer",description:"Number of recent messages (1–100)."},
     },args=>["message.history",args])
     registerActionTool("loop_direct_message","Read or send a private Loop message in the user's conversation with a colleague. Resolve the exact Human member with workspace.list first. Uses the user's own identity with scoped confirmation.",{

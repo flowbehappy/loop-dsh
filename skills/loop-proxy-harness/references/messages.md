@@ -3,7 +3,13 @@
 ## Choose the scope and audience
 
 Use the user's requested Channel, Thread, DM or Task, resolved from an authorized
-read. Read relevant history before replying. A channel can contain several Agents;
+read. Read relevant history before replying. Start a channel summary by stating whose view it covers, e.g. “从助手可见的消息看…”.
+Use the distinct authors on that page for the speaker count. A person mentioned
+in the body of a membership notice is not its author. Private membership can hide entire
+speakers even on the last page. When the user asks to verify from their own
+perspective, request that channel with `loop_channel_history` and `readAs: "human"`.
+
+A channel can contain several Agents;
 check all pages of `channel.members` before inviting missing participants.
 For a Human colleague, resolve the workspace `memberId` with the directory
 guide. For a project channel, read the project's linked channel ID. Inspect
