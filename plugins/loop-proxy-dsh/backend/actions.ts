@@ -1,3 +1,4 @@
+import {randomUUID} from "node:crypto"
 import {LoopHTTP} from "./http.ts"
 import {LoopError} from "./errors.ts"
 
@@ -58,6 +59,9 @@ export class ActionClient {
 // ordinary Agent reads and scoped Human reads still enforce their respective ACLs.
 async function resolveChannel(client: ActionClient, channelName: unknown, signal?: AbortSignal) {
   const name = typeof channelName === "string" ? channelName.trim() : ""
+  if (/(?:^|\/)channel-invites\//iu.test(name)) {
+    throw new LoopError("validation", "This is a Human channel invitation. Supply the channel display name or #slug; use the invitation in Loop with a Human account.", 400)
+  }
   if (!name || name.length > 200) {
     throw new LoopError("validation", "Supply one channel name or #slug.", 400)
   }
@@ -79,13 +83,65 @@ async function resolveChannel(client: ActionClient, channelName: unknown, signal
   return channel
 }
 
+export async function joinNamedChannel(client: ActionClient, name: unknown, self: () => Promise<string>, signal?: AbortSignal) {
+  const channel = await resolveChannel(client, name, signal)
+  if (channel.joined !== true) {
+    const agentId = await self()
+    try {
+      await client.invoke("channel.agent-add", {channelId:channel.channelId, requestId:randomUUID(), agents:[{agentId}]}, signal)
+    } catch (error) {
+      if (!(error instanceof LoopError) || error.outcomeUnknown || !permissionDenied(error)) throw error
+      throw new LoopError(error.code, `Found #${channel.name}. Loop declined self-join for this assistant (${agentId}): ${error.message}. The assistant’s owner can use Add members → Agents in this channel if allowed to invite.`, error.status)
+    }
+    const verified = await resolveChannel(client, "#"+channel.name, signal)
+    if (verified.channelId !== channel.channelId || verified.joined !== true) {
+      throw new LoopError("loop-host/result-unknown","Loop has not confirmed membership in the requested channel. Check membership before retrying.",0,true)
+    }
+  }
+  return {data:{data:{channelId:channel.channelId,name:channel.name,joined:true}}}
+}
+
 async function exactConsent(client: ActionClient, action: string, args: Record<string,unknown>, resource: string, signal?: AbortSignal, denial?: LoopError) {
   const delegation = await client.delegationPreview(action,args,signal)
-  if (delegation?.action !== action || delegation.write !== (action === "message.send") || delegation.manage !== false ||
+  if (delegation?.action !== action || delegation.write !== (action === "message.send" || action === "task.create") || delegation.manage !== false ||
       delegation.workspaceWide !== false || delegation.resourceConstraints?.length !== 1 || delegation.resourceConstraints[0] !== resource) {
     throw new LoopError("loop-host/backend-invalid","Loop did not confirm the exact "+(action === "message.history" ? "read-only authorization" : "write authorization")+".")
   }
   return {error:{code:denial?.code ?? "human_confirmation_required",message:denial?.message ?? "Confirm the requested Human identity."},delegation,delegationArguments:args}
+}
+
+export async function createNamedChannelTask(client: ActionClient, args: Record<string,unknown>, prepare: boolean, signal?: AbortSignal) {
+  const {channelName, tasks} = args
+  if (Object.keys(args).some(key => key !== "channelName" && key !== "tasks") ||
+      !Array.isArray(tasks) || tasks.length !== 1 || !tasks[0] ||
+      Object.keys(tasks[0]).some(key => !["title","assignee","description"].includes(key)) ||
+      typeof tasks[0].title !== "string" || !tasks[0].title.trim() ||
+      typeof tasks[0].assignee !== "string" || !/^[a-z0-9_]+$/u.test(tasks[0].assignee)) {
+    throw new LoopError("validation", "Supply one task title and an exact assignee member ID for the named channel.", 400)
+  }
+  const channel = await resolveChannel(client, channelName, signal)
+  const input = {board:{kind:"channel",scopeId:channel.channelId}, tasks}
+  let result
+  try {
+    result = await client.invoke("task.create", input, signal)
+  } catch (error) {
+    if (!(error instanceof LoopError) || error.outcomeUnknown) throw error
+    if (prepare && permissionDenied(error)) {
+      return {...await exactConsent(client, "task.create", {...input,requestId:randomUUID()}, "channel:"+channel.channelId, signal, error),channelLabel:"#"+channel.name}
+    }
+    if ([400,403,404].includes(error.status)) {
+      throw new LoopError(error.code, `Found #${channel.name} (${channel.channelId}, joined=${channel.joined}). ${error.message} Keep this board and assignee.`, error.status)
+    }
+    throw error
+  }
+  const data = result?.data?.data
+  const created = data?.tasks
+  const board = created?.[0]?.channelRef ?? data?.channelRef
+  if (created?.length !== 1 || !created[0]?.taskId || ![channel.channelId, "#"+channel.name].includes(board) ||
+      created[0].assigneeProfile?.memberId !== tasks[0].assignee) {
+    throw new LoopError("loop-host/result-unknown",`Check the create receipt for ${created?.[0]?.taskId || "the requested task"} on #${channel.name} (${channel.channelId}) before retrying. Returned board: ${board ?? "unspecified"}, assignee: ${created?.[0]?.assigneeProfile?.memberId ?? "unspecified"}.`,0,true)
+  }
+  return {...result, resolvedChannelId:channel.channelId}
 }
 
 export async function readNamedChannel(client: ActionClient, args: Record<string,unknown>, prepare: boolean, signal?: AbortSignal, priorDenial?: LoopError) {

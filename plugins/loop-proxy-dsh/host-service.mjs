@@ -92,6 +92,13 @@ export default class LoopHostService extends TypertRemoteService {
       }),{when:({agent})=>this.canUseAgentActions() && !this.collaboration.isFeedbackTurn(agent?.session?.id)})
     }
     const channelName = {type:"string",required:true,description:"Exact display name or #slug from the user."}
+    registerActionTool("loop_channel_join","Join the named Loop channel as this personal assistant when the user asks you to join. Use the channel name or #slug mentioned alongside a Human invitation link. Checks actual membership.",{
+      channelName,
+    },args=>["channel.agent-add",args])
+    registerActionTool("loop_channel_task","Create and assign one task in the channel the user named, including channels outside the current Session. Pass the exact channel name and assignee member ID. Submit once and inspect the receipt on uncertainty.",{
+      channelName,assignee:{type:"string",required:true,description:"Exact Loop member ID of the requested assignee."},
+      title:{type:"string",required:true},description:{type:"string"},
+    },({channelName,...task})=>["task.create",{channelName,tasks:[task]}])
     registerActionTool("loop_channel_history","Read or summarize messages in a named Loop channel. The Agent may see only some participants. For the user's own view or a complete summary from their perspective choose readAs=human, which requests single-channel read-only access.",{
       channelName,readAs:{type:"string",enum:["agent","human"]},limit:{type:"integer",description:"Number of recent messages (1–100)."},
     },args=>["message.history",args])
@@ -446,7 +453,7 @@ export default class LoopHostService extends TypertRemoteService {
   }
 
   async agentCommand(sessionId, command, signal, description) {
-    if (command.name === "task.create" && command.verb === "call") this.collaboration.checkDispatchRetry(sessionId,command)
+    if (command.name === "task.create" && command.verb === "call") this.collaboration.checkDispatchRetry(sessionId,command,true)
     const message = this.humanTasks.current(sessionId)
     if (command.verb === "pick") {
       const selected = await this.humanTasks.pick(sessionId,message,command.name,signal)
@@ -477,10 +484,21 @@ export default class LoopHostService extends TypertRemoteService {
       }
       if (named) this.channelReads.add(message)
       const input = result.delegationArguments ? JSON.stringify(result.delegationArguments) : command.input
-      const summary = result.channelLabel ? "Read channel history: "+result.channelLabel : description
+      const summary = result.channelLabel && command.name === "task.create"
+        ? "Create task in "+result.channelLabel+": "+result.delegationArguments.tasks[0].title
+        : result.channelLabel ? "Read channel history: "+result.channelLabel : description
       const grant = await this.humanTasks.offer(sessionId, message, result.owner, result.delegation, summary, signal, input, result.agentDenied)
       const response = await this.runtime.humanCommand(sessionId, {...command,input,principal:"human",connection:grant.policy.connection}, signal,
         () => this.humanTasks.current(sessionId) === message, grant)
+      if (!response.failed && command.name === "task.create" && result.channelLabel) {
+        const data = JSON.parse(response.output)?.data?.data
+        const task = data?.tasks?.[0]
+        const expected = result.delegationArguments
+        if (data?.tasks?.length !== 1 || !task?.taskId || ![expected.board.scopeId,result.channelLabel].includes(task.channelRef ?? data.channelRef) ||
+            task.assigneeProfile?.memberId !== expected.tasks[0].assignee) {
+          throw new Error("Inspect the create receipt for "+(task?.taskId ?? "the requested task")+" in "+result.channelLabel+" before retrying.")
+        }
+      }
       if (named && !response.failed) {
         const expected = result.delegationArguments?.target
         if (expected && "channel:"+JSON.parse(response.output)?.data?.data?.targetKey !== expected) {

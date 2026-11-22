@@ -371,6 +371,13 @@ export class NativeHostActions {
           if (!input.prepareDelegation) throw new LoopError("forbidden","Human confirmation is unavailable for this request.",403)
           return this.backend.humanDM(context,input.name,input.arguments,combined)
         }
+        if (action==="agentAction" && input.name==="channel.agent-add" && Object.hasOwn(input.arguments ?? {}, "channelName")) {
+          if (Object.keys(input.arguments).length !== 1) throw new LoopError("validation","Self-join accepts only the channel name.",400)
+          return this.backend.joinChannel(context,input.arguments.channelName,combined)
+        }
+        if (action==="agentAction" && input.name==="task.create" && Object.hasOwn(input.arguments ?? {}, "channelName")) {
+          return this.backend.namedChannelTask(context,input.arguments,Boolean(input.prepareDelegation),combined)
+        }
         if (action==="agentAction" && input.name==="message.history" && Object.hasOwn(input.arguments ?? {}, "channelName")) {
           return this.backend.channelHistory(context,input.arguments,Boolean(input.prepareDelegation),combined)
         }

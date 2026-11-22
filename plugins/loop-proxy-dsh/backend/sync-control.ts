@@ -16,6 +16,15 @@ function ownedBy(record:any,credential:Credential) {
 }
 function disconnecting(record:any) { return Boolean(record?.revocation || record?.accountDisconnect) }
 export interface SyncOptions {stateHome:string;syncHome:string;profile:string;installation:string;server:string}
+export async function hostSyncPrincipal(api: HostAPI, signal?: AbortSignal) {
+  const credential = await api.tokens.credential(signal)
+  const principal = await api.request("sync", "GET", "/grant", undefined, signal)
+  if (principal?.userId !== credential.principal_id || principal.workspaceId !== credential.workspace_id || typeof principal.agentId !== "string" || !principal.agentId) {
+    throw new LoopError("loop-host/needs-auth", "Loop upload identity changed")
+  }
+  return {credential,principal}
+}
+
 /** Business upload consent remains separate from possession of an account
  * credential. Binding paths and records retain the Go client's public layout. */
 export class SyncControl {
@@ -23,12 +32,7 @@ export class SyncControl {
   private options:SyncOptions
   private pages?:PageService
   constructor(api:HostAPI,options:SyncOptions,pages?:PageService){this.api=api;this.options=options;this.pages=pages}
-  async principal(signal?:AbortSignal){
-    const credential=await this.api.tokens.credential(signal)
-    const principal=await this.api.request("sync","GET","/grant",undefined,signal)
-    if(principal?.userId!==credential.principal_id || principal.workspaceId!==credential.workspace_id || typeof principal.agentId!=="string" || !principal.agentId)throw new LoopError("loop-host/needs-auth","Loop upload identity changed")
-    return {credential,principal}
-  }
+  principal(signal?:AbortSignal){return hostSyncPrincipal(this.api,signal)}
   private async bindingFile(workspace:string,signal?:AbortSignal){
     if(typeof workspace!=="string" || !workspace.trim())throw new LoopError("loop-host/invalid-request","Host Workspace identity is required")
     const credential=await this.api.tokens.credential(signal)

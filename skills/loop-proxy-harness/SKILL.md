@@ -15,6 +15,10 @@ about channel access, read the current channel roster. For a requested
 assignment, preparation checks Agent membership and reports any missing Agents.
 An invitation shares the channel and requires the user's authorization.
 
+When the user names a channel, use its exact display name or #slug. Use
+`loop_channel_join` to join as the assistant and `loop_channel_task` to assign
+a task there. A Human invitation link can accompany the channel name.
+
 ## Business actions
 
 Run one literal virtual Bash command at a time. Omit shell wrappers, pipes,

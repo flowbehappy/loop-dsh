@@ -1497,12 +1497,23 @@ export class LoopCollaborationRuntime {
     return session && this.ctx.sessionProjections.stateOf(session, "loopCollaborationReceipts")?.feedback === true
   }
 
-  checkDispatchRetry(sessionId, command) {
-    const attempted = this.currentUserInputs.get(sessionId)?.dispatchTitles
-    if (!attempted?.size) return
-    const {tasks} = JSON.parse(command.input)
-    if (Array.isArray(tasks) && tasks.some(task => typeof task?.title === "string" && attempted.has(task.title.trim()))) {
+  checkNamedTaskRetry(turn, tasks) {
+    if (Array.isArray(tasks) && tasks.some(task => typeof task?.title === "string" && turn?.namedTaskTitles?.has(task.title.trim()))) {
+      throw failure("loop-collaboration/conflict", "This named-channel task has already been attempted in this turn. Inspect the original board and receipt before another write.")
+    }
+  }
+
+  checkDispatchRetry(sessionId, command, recordNamed = false) {
+    const turn = this.currentUserInputs.get(sessionId)
+    if (!turn) return
+    const {tasks,channelName} = JSON.parse(command.input)
+    this.checkNamedTaskRetry(turn,tasks)
+    const attempted = turn.dispatchTitles
+    if (Array.isArray(tasks) && tasks.some(task => typeof task?.title === "string" && attempted?.has(task.title.trim()))) {
       throw failure("loop-collaboration/conflict", "This task already has a collaboration dispatch in this turn. Inspect its receipt or retry the original dispatch with the requested assignee. A different destination needs a new user instruction.")
+    }
+    if (recordNamed && typeof channelName === "string" && tasks?.length === 1 && typeof tasks[0]?.title === "string") {
+      (turn.namedTaskTitles ??= new Set()).add(tasks[0].title.trim())
     }
   }
 
@@ -2166,10 +2177,13 @@ export class LoopCollaborationRuntime {
 
     register({
       name: "collaboration_dispatch",
-      description: "When the user explicitly asks, create and track exactly one Loop Task for the selected colleague or Agent, with results returned to this Session. Supply tasks: [{title, description, assignee}], using the exact directory memberId. This dispatch uses the session’s bound channel. For a task owned directly by a named project, resolve project.list by name and call task.create with projectId and assignee together. Preserve the requested target and assignee on failure. Verify channel membership and complete any authorized Agent invitation first. A mention alone does not authorize a Task. An unknown dispatch outcome must be recovered through the original operation; never switch to task.create.",
+      description: "When the user explicitly asks, create and track exactly one Loop Task for the selected colleague or Agent, with results returned to this Session. Supply tasks: [{title, description, assignee}], using the exact directory memberId. This dispatch uses the session’s bound channel. When the user names a destination channel, use loop_channel_task with that name and assignee instead. For a task owned directly by a named project, resolve project.list by name and call task.create with projectId and assignee together. Preserve the requested target and assignee on failure. Verify channel membership and complete any authorized Agent invitation first. A mention alone does not authorize a Task. An unknown dispatch outcome must be recovered through the original operation; never switch to task.create.",
       parameters: dispatchToolParameters(),
       async execute(args, exec) {
         const task = validateDispatchTasks(args)
+        const turn = runtime.currentUserInputs.get(sessionId(exec))
+        runtime.checkNamedTaskRetry(turn,[task])
+        if (turn) (turn.dispatchTitles ??= new Set()).add(task.title.trim())
         const directory = await runtime.directory({sessionId: sessionId(exec), query: task.assignee, limit: MAX_DIRECTORY_LIMIT}, exec.signal)
         const entries = (directory?.entries ?? []).filter(entry => entry?.memberId === task.assignee)
         if (entries.length !== 1 || !["human", "agent"].includes(entries[0].targetType) ||
@@ -2177,8 +2191,6 @@ export class LoopCollaborationRuntime {
           throw failure("loop-collaboration/invalid-request", "assignee must identify one exact directory member; no Task was created")
         }
         const target = entries[0]
-        const turn = runtime.currentUserInputs.get(sessionId(exec))
-        if (turn) (turn.dispatchTitles ??= new Set()).add(task.title.trim())
         return await runtime.runAction("dispatch", sessionId(exec), {
           actionKey: actionDigest(canonicalJSON(args)),
           target: {targetId: target.targetId, kind: target.targetType},

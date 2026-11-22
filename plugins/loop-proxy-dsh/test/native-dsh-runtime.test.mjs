@@ -90,8 +90,8 @@ export async function apply(ctx){
      const input=JSON.parse(raw);assert.equal(input.model,'native-test-model');assert.ok(input.messages.length)
      upstreamCalls++
      const nl=String.fromCharCode(10),event=value=>'data: '+JSON.stringify(value)+nl+nl
-     res.writeHead(200,{'Content-Type':'text/event-stream'})
      const call=channelJourney ? channelJourney.next(input) : business?.next(input)
+     res.writeHead(200,{'Content-Type':'text/event-stream'})
      res.write(event({id:'test-completion',object:'chat.completion.chunk',created:1,model:'native-test-model',choices:[{index:0,delta:call?{role:'assistant',tool_calls:[call]}:{role:'assistant',content:'NATIVE_DSH_MODEL_OK'},finish_reason:null}]}))
      res.end(event({id:'test-completion',object:'chat.completion.chunk',created:1,model:'native-test-model',choices:[{index:0,delta:{},finish_reason:call?'tool_calls':'stop'}],usage:{prompt_tokens:12,completion_tokens:6,total_tokens:18}})+'data: [DONE]'+nl+nl)
     }catch(error){upstreamError=String(error);res.writeHead(500).end()}
@@ -177,7 +177,7 @@ export async function apply(ctx){
        const done=await ctx.sessionController.wait({sessionId:result.session.sessionId,timeoutMs:20000},AbortSignal.timeout(25000))
        assert.equal(upstreamError,'')
        assert.ok(JSON.stringify(done.output).includes("NATIVE_DSH_MODEL_OK"))
-       channelJourney.verifyTurn()
+       await channelJourney.verifyTurn()
      }
      control.abort()
      result.channelScenarios=channelJourney.scenarios.length
@@ -251,7 +251,7 @@ export async function apply(ctx){
   if(method==='browser' && process.env.LOOP_TS_E2E_BUSINESS==='1')assert.equal(result.business,true)
   if(publicOrigin)assert.deepEqual(result.worksite,{relay:true,launch:true,remoteHost:true,remoteOAuth:true})
   if(base)assert.deepEqual(result.realLoop,{method,account:true,modelCatalog:true,sessionAction:true,modelStream:true,telemetrySync:true,disconnect:true})
-  if(method==="browser" && process.env.LOOP_TS_E2E_CHANNEL==="1") {assert.equal(result.channelScenarios,8);t.diagnostic("8 channel history and authorization scenarios verified")}
+  if(method==="browser" && process.env.LOOP_TS_E2E_CHANNEL==="1") {assert.equal(result.channelScenarios,15);t.diagnostic("15 channel history, consent, membership and named-board task scenarios verified")}
   const worksite=publicOrigin
     ? `enabled(relay=${result.worksite?.relay===true},launch=${result.worksite?.launch===true},remoteHost=${result.worksite?.remoteHost===true},remoteOAuth=${result.worksite?.remoteOAuth===true})`
     : 'not-requested'

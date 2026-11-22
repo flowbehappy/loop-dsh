@@ -286,6 +286,21 @@ test("a rejected dispatch cannot become an unassigned task through the generic a
   f.collaboration.checkDispatchRetry(SESSION_ID,command("Review"))
 })
 
+test("a named-channel attempt blocks duplicate and alternate writes for that task in this turn", async () => {
+  const f = naturalSelectionFixture()
+  await f.claim()
+  const tasks = [{title:"Design review",assignee:"mem_a"}]
+  const command = params => ({verb:"call",name:"task.create",input:JSON.stringify(params)})
+  const named = command({channelName:"Design",tasks})
+  f.collaboration.checkDispatchRetry(SESSION_ID,named,true)
+  assert.throws(()=>f.collaboration.checkDispatchRetry(SESSION_ID,named,true),/original board/)
+  assert.throws(()=>f.collaboration.checkDispatchRetry(SESSION_ID,command({tasks})),/original board/)
+  await assert.rejects(f.tool("collaboration_dispatch").execute({tasks},f.exec),/original board/)
+  assert.equal(f.calls.filter(([name])=>name==="action").length,0)
+  f.emit("session/event", f.agent.session, {type:"turn/end"})
+  f.collaboration.checkDispatchRetry(SESSION_ID,named)
+})
+
 test("a cached preparation revalidates the route without replaying an intent", async () => {
   const f = naturalSelectionFixture()
   await f.claim()

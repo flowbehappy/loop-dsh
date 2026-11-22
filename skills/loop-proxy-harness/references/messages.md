@@ -11,8 +11,14 @@ guide. For a project channel, read the project's linked channel ID. Inspect
 omits it. Use the ordinary `loop-proxy call channel.human-member-add` with
 `channelId` and `memberId`; the Host obtains any required personal approval.
 After approval, verify membership with `channel.members`.
-`channel.agent-add` requires channel management permission and authorization to
-share that channel's content. The agents guide explains identity mapping.
+When asked to join as the current assistant, use `loop_channel_join` with the
+exact display name or #slug. It checks the workspace directory, joins an ordinary
+public channel with the assistant's own identity and verifies membership. An
+invitation URL is for Humans. If the user also named the channel, use that name.
+If only the URL is available, ask for its display name or #slug. For a private
+channel, the assistant's owner with invite permission can select their assistant
+under Add members → Agents. Inviting another Agent requires management permission
+and authorization to share the channel's content.
 
 Address an Agent by copying its directory `mention` into message content.
 On older servers, use `[@Name](/mentions/agent/<agentId>)` with the exact returned
