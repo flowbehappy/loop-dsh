@@ -4,7 +4,7 @@ order: 90
 
 # Connect DeepSeek Harness to Loop
 
-Download [loop-dsh.tgz](https://github.com/flowbehappy/loop-dsh/releases/latest/download/loop-dsh.tgz). In DSH, open Plugins, add a third-party plugin, and enter the downloaded file’s absolute path. If prompted about the `koffi` installation script, review the package name and approve it to finish installing. Restart DSH if prompted.
+Download and install the desktop app for your platform from the [DeepSeek Harness website](https://deepseek.com/harness/), then open it. Download the Loop plugin, [loop-dsh.tgz](https://github.com/flowbehappy/loop-dsh/releases/latest/download/loop-dsh.tgz). In DSH, open Plugins, add a third-party plugin, and enter the downloaded file’s absolute path. If prompted about the `koffi` installation script, review the package name and approve it to finish installing. Restart DSH if prompted.
 
 ## Sign in and authorize
 

@@ -4,7 +4,7 @@ order: 90
 
 # 将 DeepSeek Harness 连接到 Loop
 
-先[下载插件包](https://github.com/flowbehappy/loop-dsh/releases/latest/download/loop-dsh.tgz)，按[安装和登录步骤](../../../../README.md#安装和登录)将它装入 DSH。
+先从 [DeepSeek Harness 官网](https://deepseek.com/harness/)下载安装 DSH 桌面端，再[下载 Loop 插件包](https://github.com/flowbehappy/loop-dsh/releases/latest/download/loop-dsh.tgz)。按[安装和登录步骤](../../../../README.md#安装和登录)将插件装入 DSH 并连接工作区。
 
 ## 登录与权限
 
