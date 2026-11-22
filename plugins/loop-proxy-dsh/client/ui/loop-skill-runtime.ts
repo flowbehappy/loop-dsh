@@ -177,14 +177,6 @@ class LoopSkillSessionRuntime {
     return pickedLoopSkill(pick, this.sessionId)
   }
 
-  codec() {
-    return loopSkillCodec(this.sessionId, this.options.formatFailure)
-  }
-
-  async serialize(value: string, signal: AbortSignal): Promise<string> {
-    return await this.codec().serialize(value, signal)
-  }
-
   private startStream(): void {
     if (this.stream !== null || this.options.remote.skillCatalogEvents === undefined) return
     const controller = new AbortController()
@@ -460,15 +452,14 @@ export class LoopSkillRuntime {
           if (decoded instanceof Error) {
             throw owner.localizedFailure(decoded, 'loop-skill/invalid-reference')
           }
-          const runtime = this.sessions.get(decoded.sessionId)
-          if (runtime === undefined) {
+          if (!owner.options.workspaceForSession(decoded.sessionId)) {
             const error = loopSkillError(
               'loop-skill/session-inactive',
               'This Loop Skill reference belongs to an inactive Session.',
             )
             throw owner.localizedFailure(error, 'loop-skill/internal')
           }
-          return await runtime.serialize(value, signal)
+          return await loopSkillCodec(decoded.sessionId, owner.options.formatFailure).serialize(value, signal)
         },
       },
       async candidates(session: ClientSessionContext, request: CandidateRequest) {

@@ -83,7 +83,7 @@ export class LoopKnowledgeRuntime {
           signal.throwIfAborted()
           try {
             const ref = decodeKnowledgeReference(value)
-            if (!owner.sessions.has(ref.sessionId)) throw new Error()
+            if (!owner.options.workspaceForSession(ref.sessionId)) throw new Error()
             return encodeKnowledgeReference(ref)
           } catch { throw new Error(owner.options.failureText) }
         },

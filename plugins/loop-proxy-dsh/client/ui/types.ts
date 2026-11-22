@@ -52,7 +52,7 @@ export interface ProjectChoice {
   readonly projectId: string
   readonly projectName: string
   readonly defaultChannelId?: string
-  readonly role: 'view' | 'edit' | 'manage' | 'owner'
+  readonly role: string
 }
 
 export interface ConfirmedProjectChoice extends ProjectChoice {

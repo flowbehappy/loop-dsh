@@ -38,6 +38,46 @@ async function fixture(t, handler = (_req, res) => res.end('{}')) {
     access_expires_at: new Date(Date.now() + 3600_000).toISOString()}
   return {root, base, store, credentials, value, provider: contexts[0].get('credentials')}
 }
+test('project binding uses server access decisions independent of role labels and service failures', async t => {
+  const {SyncControl} = await import('../backend/sync-control.ts')
+  const {HostAPI} = await import('../backend/host-api.ts')
+  let status = 200
+  const f = await fixture(t, (req, res) => {
+    assert.ok(req.url.endsWith('/actions/project.get/invocations'))
+    res.writeHead(status).end(JSON.stringify(status === 200 ? {data:{}} : {error:{code:'project_error',message:'Project check returned ' + status}}))
+  })
+  const credential = await f.credentials.publish(f.value)
+  const project = {id:'project', name:'Example', workspaceId:'workspace', viewerRole:'edit'}
+  const grant = {grantId:'grant', clientId:'client', resource:f.value.resource, agent:{agentId:'agent',displayName:'Agent'}}
+  const pages = {async request(method, path) {
+    if (path === '/api/v1/me') return {id:'principal',name:'User'}
+    if (path.endsWith('/super-agent-grants')) return {grants:[grant]}
+    if (path.endsWith('/workspaces')) return [{id:'workspace',name:'Workspace'}]
+    if (path.includes('/projects?')) return {projects:[project]}
+    return {project}
+  }}
+  const sync = new SyncControl(new HostAPI(new TokenManager(f.credentials, credential)), {
+    installation:'installation', server:f.base, stateHome:f.root, syncHome:f.root, profile:'test',
+  }, pages)
+  const input = {workspace:{workspaceId:'local'}, agentId:'agent', projectId:'project'}
+  assert.equal((await sync.projectCatalog()).projects[0].role, 'edit')
+  await sync.prepareProject(input)
+  await sync.refreshMetadata({...input, projectName:'Updated', workspaceName:'Workspace'})
+  project.viewerRole = 'custom_role'
+  assert.equal((await sync.projectCatalog()).projects[0].role, 'custom_role')
+  await sync.refreshMetadata({...input, projectName:'Updated', workspaceName:'Workspace'})
+  status = 503
+  await assert.rejects(sync.prepareProject(input), {code:'project_error',status:503})
+  await assert.rejects(sync.workspaceStatus(input), {code:'project_error',status:503})
+  status = 403
+  await assert.rejects(sync.prepareProject(input), {code:'loop-host/waiting-for-access',status:403})
+  assert.equal((await sync.workspaceStatus(input)).state, 'waiting_for_access')
+  status = 404
+  assert.equal((await sync.workspaceStatus(input)).state, 'target_unavailable')
+  status = 401
+  assert.equal((await sync.workspaceStatus(input)).state, 'needs_auth')
+})
+
 test('binding recovery verifies the original channel, restores actions and fences prior upload consent',async t=>{
   const {NativeHostActions}=await import('../backend/adapter.ts')
   const {DurableJSON}=await import('../backend/storage.ts')

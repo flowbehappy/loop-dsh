@@ -78,7 +78,13 @@ export class SyncControl {
     const credential=await this.api.tokens.credential(signal)
     if(target.projectId){
       try{await new ActionClient(new LoopHTTP(this.api.tokens,credential.resource)).invoke("project.get",{projectId:target.projectId},signal)}
-      catch(error){if(error instanceof LoopError&&error.code==="loop-host/needs-auth")return {state:"needs_auth",reason:"Loop authorization is unavailable"};return {state:"target_unavailable",reason:"The bound Agent cannot access this Project"}}
+      catch (error) {
+        if (!(error instanceof LoopError) || error.outcomeUnknown) throw error
+        if (error.status === 401 || error.code === "loop-host/needs-auth") return {state:"needs_auth",reason:error.message}
+        if (error.status === 403) return {state:"waiting_for_access",reason:error.message}
+        if (error.status === 404) return {state:"target_unavailable",reason:error.message}
+        throw error
+      }
     }else{
       const {principal}=await this.principal(signal)
       if(principal.agentId!==target.agentId)throw new LoopError("loop-host/conflict","Workspace Agent changed")
@@ -94,7 +100,6 @@ export class SyncControl {
     if(grant.agent.agentId!==previous.agentId)throw new LoopError("loop-host/conflict","Managed Project Agent changed")
     const {project}=await this.pages!.request("GET",root+"/"+encodeURIComponent(input.projectId)+"?envelope=container",undefined,signal)
     if(project?.workspaceId!==credential.workspace_id||project.id!==input.projectId||project.status&&project.status!=="active")throw new LoopError("loop-host/target-unavailable","Managed Project is unavailable")
-    if(!["owner","manage","view"].includes(project.viewerRole))throw new LoopError("loop-host/waiting-for-access","Managed Project access is unavailable")
     const {file}=await this.bindingFile(input.workspace.workspaceId,signal)
     return file.transaction(async(record,save)=>{
       if(!record||disconnecting(record)||!ownedBy(record,credential)||record.target.projectId!==previous.projectId||record.target.agentId!==previous.agentId)throw new LoopError("loop-host/conflict","Managed Project binding changed")
@@ -130,8 +135,7 @@ export class SyncControl {
         if(!project.id || project.workspaceId!==credential.workspace_id || seen.has(project.id) || projects.length>=200)throw new LoopError("loop-host/backend-invalid","Project catalog identity is invalid")
         seen.add(project.id)
         if(project.status && project.status!=="active")continue
-        if(!["owner","manage","view"].includes(project.viewerRole))throw new LoopError("loop-host/backend-invalid","Invalid Project role")
-        projects.push({workspaceId:credential.workspace_id,workspaceName:workspace.name||workspace.id,projectId:project.id,projectName:project.name,defaultChannelId:"",role:project.viewerRole})
+        projects.push({workspaceId:credential.workspace_id,workspaceName:workspace.name||workspace.id,projectId:project.id,projectName:project.name,defaultChannelId:"",role:project.viewerRole ?? ""})
       }
       if(!response.hasMore)return {state:"active",accountPrincipal:credential.principal_id,accountName:me.displayName||me.name||me.email,workspaceId:workspace.id,workspaceName:workspace.name||workspace.id,agent:grant.agent,projects}
       if(!response.nextCursor || response.nextCursor===cursor)throw new LoopError("loop-host/backend-invalid","Project cursor did not advance")
@@ -145,7 +149,7 @@ export class SyncControl {
     const {credential,workspace,root}=await this.projectIdentity(signal)
     const response=await this.pages!.request("POST",root+"?envelope=container",{name,prefix},signal)
     if(!response?.project?.id||response.project.workspaceId!==credential.workspace_id)throw new LoopError("loop-host/backend-invalid","Project creation returned an invalid identity",0,true)
-    return {workspaceId:credential.workspace_id,workspaceName:workspace.name||workspace.id,projectId:response.project.id,projectName:response.project.name,role:"owner"}
+    return {workspaceId:credential.workspace_id,workspaceName:workspace.name||workspace.id,projectId:response.project.id,projectName:response.project.name,role:response.project.viewerRole ?? ""}
   }
   async prepareProject(input:any,signal?:AbortSignal){
     const {credential,grant,me,workspace,root}=await this.projectIdentity(signal)
@@ -160,7 +164,12 @@ export class SyncControl {
       // retired /agent-grants endpoint must not be revived or replaced by a
       // hidden Human privilege escalation.
       try{await new ActionClient(new LoopHTTP(this.api.tokens,credential.resource)).invoke("project.get",{projectId:input.projectId},signal)}
-      catch{throw new LoopError("loop-host/waiting-for-access","The selected Agent cannot access this Project")}
+      catch (error) {
+        if (error instanceof LoopError && !error.outcomeUnknown && error.status === 403) {
+          throw new LoopError("loop-host/waiting-for-access", error.message, error.status)
+        }
+        throw error
+      }
       const target={loopServiceBaseUrl:this.options.server,loopWorkspaceId:credential.workspace_id,loopWorkspaceName:workspace.name||workspace.id,
         projectId:project.id,projectName:project.name,defaultChannelId:"",agentId:input.agentId,agentName:grant.agent.displayName||input.agentId,accountName:me.displayName||me.name||me.email,
         webUrl:this.options.server+"/w/"+encodeURIComponent(credential.workspace_id)+"/projects/"+encodeURIComponent(project.id)+"/tasks"}

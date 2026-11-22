@@ -401,15 +401,13 @@ export default class LoopHostService extends TypertRemoteService {
     return this.remote(signal, () => this.humanTasks.decide(request))
   }
 
-  async agentCommand(sessionId, command, signal, agent, description) {
+  async agentCommand(sessionId, command, signal, description) {
     const message = this.humanTasks.current(sessionId)
-    return this.skills.scopedKnowledgeCommand(agent, command, async () => {
-      const result = await this.runtime.agentCommand(sessionId, command, signal, this.humanTasks.canOffer(message))
-      if (!result.delegation) return result
-      const grant = await this.humanTasks.offer(sessionId, message, result.owner, result.delegation, description, signal, command.input)
-      return this.runtime.humanCommand(sessionId, {...command,principal:"human",connection:grant.policy.connection}, signal,
-        () => this.humanTasks.current(sessionId) === message, grant)
-    }, signal)
+    const result = await this.runtime.agentCommand(sessionId, command, signal, this.humanTasks.canOffer(message))
+    if (!result.delegation) return result
+    const grant = await this.humanTasks.offer(sessionId, message, result.owner, result.delegation, description, signal, command.input)
+    return this.runtime.humanCommand(sessionId, {...command,principal:"human",connection:grant.policy.connection}, signal,
+      () => this.humanTasks.current(sessionId) === message, grant)
   }
 
   async remote(signal, operation) {

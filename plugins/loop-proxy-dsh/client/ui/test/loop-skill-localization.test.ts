@@ -1,3 +1,4 @@
+import {loopSkillCodec} from '../loop-skill-reference.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type {
@@ -60,7 +61,7 @@ test('serializer rejections carry localized messages without duplicate notices',
   const failures: Error[] = []
   const runtime = new LoopSkillRuntime({
     remote: {} as LoopHostClient,
-    workspaceForSession: () => workspace,
+    workspaceForSession: id => id === "ses_inactive" ? undefined : workspace,
     formatFailure: failure => localizedFormatter(locale)(failure),
     showFailure: error => failures.push(error),
   })
@@ -120,12 +121,10 @@ test('serializer rejections carry localized messages without duplicate notices',
   }
   assert.equal(failures.length, 0, 'the DSH composer owns serializer failure presentation')
 
-  const sessionRuntime = (runtime as unknown as {
-    forSession(sessionId: string): {codec(): NonNullable<InputTriggerSource['codec']>}
-  }).forSession('ses_localization')
+  const codec = loopSkillCodec('ses_localization', failure => localizedFormatter(locale)(failure))
   for (const dictionary of [en, zh, zhTW, ja]) {
     locale = dictionary
-    const mismatch = await rejection(sessionRuntime.codec().serialize(
+    const mismatch = await rejection(codec.serialize(
       encodedReference(reference({sessionId: 'ses_other'})),
       signal,
     ))

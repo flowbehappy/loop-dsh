@@ -104,7 +104,7 @@ export function createLoopProxyBridge(ctx, options = {}) {
     }
     if (loopHost?.canUseAgentActions?.() === true) {
       try {
-        const automatic = await loopHost.agentCommand(sessionID, parsed, exec.signal, exec.agent, args.description)
+        const automatic = await loopHost.agentCommand(sessionID, parsed, exec.signal, args.description)
         return shellResult(sessionID, automatic, exec)
       } catch (error) {
         return shellResult(sessionID, {

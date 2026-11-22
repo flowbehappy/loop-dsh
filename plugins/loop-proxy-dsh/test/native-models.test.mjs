@@ -58,6 +58,24 @@ test('model catalog and concurrent lease creation use one control-plane request 
   assert.deepEqual(f.calls.at(-1).body,{hostInstallationId:'installation',hostSessionId:'session-one',modelId:'model',source:'loop_proxy',wireApi:'openai-completions',purpose:'conversation'})
 })
 
+test('model session access follows Loop when the discovery catalog is stale', async t => {
+  const f = await fixture(t, (call, _req, res) => {
+    if (call.url.endsWith('/models')) {
+      res.end(JSON.stringify({connectionId:'grant', workspaceId:'workspace', models:[]}))
+      return true
+    }
+    if (call.url.endsWith('/sessions') && call.body.hostSessionId === 'denied') {
+      res.writeHead(403).end('{}')
+      return true
+    }
+    return false
+  })
+  assert.deepEqual((await f.models.runtimeCatalog()).connections[0].models, [])
+  assert.ok((await f.models.ensureSession(input)).localKey)
+  await assert.rejects(f.models.ensureSession({...input, hostSessionId:'denied'}), {status:403})
+  assert.equal(f.calls.filter(call => call.url.endsWith('/sessions')).length, 2)
+})
+
 test('model bridge streams data using the lease and removes authority and cookie headers',async t=>{
   let received
   const f=await fixture(t,(call,_req,res)=>{

@@ -116,10 +116,6 @@ export class ModelService {
       assertCurrent()
       const credential = await this.api.tokens.credential(combined)
       if (credential.grant_id !== input.connectionId) throw new LoopError("loop-host/needs-auth", "Loop model connection changed")
-      if (!this.catalog) await this.refreshCatalog(combined)
-      if (!this.catalog!.models.some(model => model.id === input.modelId && model.source === input.source && model.wireApi === input.wireApi && (!input.providerId || input.providerId === model.providerId))) {
-        throw new LoopError("loop-host/target-unavailable", "Loop model is not in the authorized catalog")
-      }
       assertCurrent()
       let lease = this.leases.get(cache)
       if (!lease || Date.now() >= lease.refresh || Date.now() >= lease.expires) {

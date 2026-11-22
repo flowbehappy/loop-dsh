@@ -1910,7 +1910,7 @@ function validateProjectSyncCatalog(value, expected) {
         typeof project.projectId !== "string" || project.projectId === "" ||
         typeof project.projectName !== "string" || project.projectName === "" ||
         project.workspaceId !== expected.loopWorkspaceId ||
-        !["view", "edit", "manage", "owner"].includes(project.role)) {
+        typeof project.role !== "string") {
       throw failure("loop-host/backend-invalid", "Loop Project metadata is invalid")
     }
     if (seen.has(project.projectId)) {
@@ -2008,7 +2008,7 @@ function validateProjectChoice(project) {
     || typeof project.projectName !== "string" || project.projectName === ""
     || typeof project.workspaceId !== "string" || project.workspaceId === ""
     || typeof project.workspaceName !== "string" || project.workspaceName === ""
-    || !["view", "edit", "manage", "owner"].includes(project.role)) {
+    || typeof project.role !== "string") {
     throw failure("loop-host/backend-invalid", "Project choice is invalid")
   }
 }

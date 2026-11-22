@@ -93,7 +93,7 @@ function userMessageText(message) {
 function knowledgeSelection(message, sessionId) {
   const text = userMessageText(message)
   if (!text.includes("<loop-knowledge-ref>")) return undefined
-  const refs = new Map()
+  const refs = new Set()
   let invalid = Buffer.byteLength(text, "utf8") > MAX_REFERENCE_TEXT
   const content = message.content.map(block => {
     if (block?.type !== "text" || typeof block.text !== "string") return block
@@ -103,7 +103,7 @@ function knowledgeSelection(message, sessionId) {
         const ref = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"))
         if (ref?.version !== 1 || ref.sessionId !== sessionId || typeof ref.kbId !== "string" ||
             !ref.kbId || ref.kbId.length > 255 || typeof ref.name !== "string" || !ref.name.trim() || ref.name.length > 1024) throw new Error()
-        refs.set(ref.kbId, ref)
+        refs.add(ref.kbId)
         if (refs.size > MAX_INJECTIONS) throw new Error()
         return `Loop · ${ref.name.replace(/[\p{Cc}\p{Cf}]/gu, " ")}`
       } catch {
@@ -114,7 +114,7 @@ function knowledgeSelection(message, sessionId) {
     if (cleaned.includes("<loop-knowledge-ref>")) invalid = true
     return {...block, text: cleaned}
   })
-  return {content, ids: new Set(refs.keys()), blocked: invalid || refs.size === 0}
+  return {content, kbIds: invalid ? [] : [...refs]}
 }
 
 function claimedLoopSkillReferences(messages, sessionId) {
@@ -193,13 +193,11 @@ function workspaceIdForSession(ctx, sessionId) {
 }
 
 /**
- * Host-owned Loop Skill catalog transport. The Host action remains the only
- * authority boundary; this class only starts one invalidation watch, fans out
+ * Host-owned Loop Skill catalog transport. The Loop authorizes catalog and content reads; this class only starts one invalidation watch, fans out
  * ordered changes, and serves the pre-step reader.
  */
 export class LoopSkillRuntime {
   constructor(ctx, options) {
-    this.knowledgeRequests = new WeakMap()
     if (!ctx || typeof options?.getActions !== "function") {
       throw new TypeError("Loop Skill runtime requires Host context and actions")
     }
@@ -331,14 +329,12 @@ export class LoopSkillRuntime {
   }
 
   async knowledgeCatalog(request, signal) {
-    await this.startWatch(request.workspaceId)
     const actions = this.getActions?.() ?? this.actions
     if (typeof actions?.knowledgeCatalog !== "function") throw failure("loop-host/capability-unsupported", "Update the Loop plugin to use knowledge bases")
     return await actions.knowledgeCatalog(request, signal)
   }
 
   async catalog(request, signal) {
-    await this.startWatch(request.workspaceId)
     const actions = this.getActions?.() ?? this.actions
     if (typeof actions?.skillCatalog !== "function") {
       throw failure("loop-host/capability-unsupported", "This Loop Host cannot load Loop Skills")
@@ -554,124 +550,32 @@ export class LoopSkillRuntime {
     }
   }
 
-  async scopedKnowledgeCommand(agent, command, run, signal) {
-    if (command.verb !== "call" || !command.name.startsWith("kb.")) return run()
-    const args = JSON.parse(command.input)
-    const scope = await this.restoreKnowledgeScope(agent, signal)
-    if (!scope) return run()
-    const denied = () => failure("loop-knowledge/scope", "This request is limited to the explicitly selected knowledge bases. Use kb.retrieve with the selected kbIds, then kb.evidence with a returned evidenceRef; do not broaden the search. Reopen / to select a different library.")
-    if (scope.blocked) throw denied()
-    if (command.name === "kb.retrieve") {
-      if (!Array.isArray(args.kbIds) || args.kbIds.length === 0 || args.kbIds.some(id => !scope.ids.has(id))) throw denied()
-    } else if (command.name === "kb.evidence") {
-      if (!scope.evidence.has(args.evidenceRef)) throw denied()
-    } else throw denied()
-    const result = await run()
-    if (!result.failed && command.name === "kb.retrieve") {
-      const collect = value => {
-        if (!value || typeof value !== "object") return
-        if (typeof value.evidenceRef === "string" && scope.evidence.size < 256) scope.evidence.add(value.evidenceRef)
-        for (const child of Object.values(value)) collect(child)
-      }
-      try { collect(JSON.parse(result.output).data) } catch {}
-    }
-    return result
-  }
-
-  async verifyKnowledgeIds(sessionId, ids, signal) {
-    const workspaceId = workspaceIdForSession(this.ctx, sessionId)
-    if (!workspaceId) throw failure("loop-host/workspace-unavailable", "The Session no longer belongs to a Host workspace")
-    for (const kbId of ids) {
-      signal?.throwIfAborted()
-      const result = await this.knowledgeCatalog({workspaceId, sessionId, kbId}, signal)
-      signal?.throwIfAborted()
-      const items = readData(result).items
-      if (!Array.isArray(items) || items.length !== 1 || items[0].kbId !== kbId) {
-        throw failure("loop-knowledge/unavailable", "The selected knowledge base is no longer available")
-      }
-    }
-  }
-
-  async restoreKnowledgeScope(agent, signal) {
-    if (!agent?.session?.id) return undefined
-    if (this.knowledgeRequests.has(agent)) return this.knowledgeRequests.get(agent)
-    // Public exact-log read also survives context compaction. The log is the
-    // only durable selection source; cached permissions/evidence never survive.
-    const {events} = await this.ctx.sessionQuery.readSession(agent.session.id)
-    signal?.throwIfAborted()
-    const messages = events.filter(event => event.type === "user/message").map(event => event.data)
-    const latest = messages.findLast(message => message.source?.kind === "user")
-    let scope = null
-    if (latest) {
-      const context = messages.findLast(message => message.source?.kind === "skill-invocation" &&
-        message.source.loopKnowledge?.userMessageId === latest.id)?.source.loopKnowledge
-      if (context) {
-        const valid = context.version === 1 && context.sessionId === agent.session.id &&
-          Array.isArray(context.kbIds) && context.kbIds.length > 0 && context.kbIds.length <= MAX_INJECTIONS &&
-          context.kbIds.every(id => typeof id === "string" && id.length > 0 && id.length <= 255)
-        scope = {identity: latest.id, ids: new Set(valid ? context.kbIds : []), evidence: new Set(), blocked: !valid || context.blocked !== false}
-      } else {
-        const selection = knowledgeSelection(latest, agent.session.id)
-        if (selection) scope = {identity: latest.id, ids: selection.ids, evidence: new Set(), blocked: selection.blocked}
-      }
-      if (scope && !scope.blocked) {
-        try { await this.verifyKnowledgeIds(agent.session.id, scope.ids, signal) }
-        catch { signal?.throwIfAborted(); scope.blocked = true }
-      }
-    }
-    this.knowledgeRequests.set(agent, scope)
-    return scope
-  }
-
   async injectClaimedUserKnowledge(agent, messages, decision, signal) {
     const sessionId = agent?.session?.id
     if (typeof sessionId !== "string" || decision?.kind !== "enter") return decision
     const claimed = new Set((messages ?? []).filter(message => message?.source?.kind === "user").map(message => message.id))
     const admitted = decision.messages.filter(message => message?.source?.kind === "user" && claimed.has(message.id))
     if (admitted.length === 0) return decision
-    const latest = admitted.at(-1)
     const replacements = new Map()
     const injections = []
-    let latestScope = null
     for (const message of admitted) {
       const selection = knowledgeSelection(message, sessionId)
       if (!selection) continue
       signal?.throwIfAborted()
-      const scope = {identity: message.id, ids: selection.ids, evidence: new Set(), blocked: selection.blocked}
-      let instruction
-      try {
-        if (scope.blocked) throw failure("loop-knowledge/invalid-reference", "The selected knowledge base reference is invalid. Reopen / and select it again.")
-        await this.verifyKnowledgeIds(sessionId, scope.ids, signal)
-        instruction = [
-          `For this user request only, the selected Loop knowledge bases are ${JSON.stringify({kbIds:[...scope.ids]})}.`,
-          "Read loop-proxy guide knowledge for retrieval and evidence instructions. Selection does not grant access or permit searching other libraries.",
-        ].join("\n")
-      } catch (error) {
-        signal?.throwIfAborted()
-        scope.blocked = true
-        instruction = [
-          "The explicitly selected Loop knowledge base could not be verified. Do not retrieve from another library, guess its content or reuse earlier material from this library.",
-          `Reason: ${error instanceof Error ? error.message : String(error)}`,
-          "Explain the reason in the user's language. Retry temporary connection failures in this chat; for revoked access restore access through Loop, or reopen / and explicitly select an available library. Selecting never grants access and does not require a new authorization popup by itself.",
-        ].join("\n")
-      }
+      const {kbIds} = selection
+      const instruction = kbIds.length
+        ? `The user referenced these Loop knowledge bases: ${JSON.stringify({kbIds})}. Loop checks access on each action. For “what is in this library”, list BOTH online documents (kb.doc-list by kbId) and sources (kb.list by kbIds), then browse the returned sources. Report any unchecked category as unknown. See loop-proxy guide knowledge.`
+        : "The knowledge base reference in this message is invalid. Ask for the intended library if the request is ambiguous."
       const {createUserMessage, freezeMessage} = await this.loadSkillSupport()
       replacements.set(message, freezeMessage({...message, content: selection.content}))
       injections.push(createUserMessage({
         content: [{type: "text", text: instruction}],
         source: {kind: "skill-invocation", name: "Loop knowledge", form: "instructions",
-          loopKnowledge: {version: 1, sessionId, userMessageId: message.id, kbIds: [...scope.ids], blocked: scope.blocked}},
+          loopKnowledge: {version: 1, sessionId, userMessageId: message.id, kbIds, blocked: kbIds.length === 0}},
       }))
-      if (message === latest) latestScope = scope
     }
     signal?.throwIfAborted()
-    // Publish only once preparation succeeds. Retrying an aborted admission must
-    // repeat authorization and keep its context; no process-wide seen-token set.
-    if (injections.length === 0) {
-      if (!decision.messages.some(message => message.source?.loopKnowledge?.userMessageId === latest.id)) this.knowledgeRequests.set(agent, null)
-      return decision
-    }
-    this.knowledgeRequests.set(agent, latestScope)
+    if (injections.length === 0) return decision
     return {...decision, messages: [...decision.messages.map(message => replacements.get(message) ?? message), ...injections]}
   }
 

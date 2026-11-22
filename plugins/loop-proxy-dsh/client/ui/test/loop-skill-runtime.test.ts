@@ -144,6 +144,10 @@ test('picking and serializing a Loop Skill never executes it', async () => {
   const reference = decodeLoopSkillReference(serialized)
   assert.equal(reference?.skillId, 'skl_a')
   assert.equal(reference?.versionId, 'ctv_a')
+  const reopened = fixture()
+  assert.equal(await reopened.source.codec!.serialize(outcome.insert.ref, new AbortController().signal), serialized)
+  assert.equal(reopened.calls(), 0)
+  reopened.runtime.dispose()
   assert.equal(h.calls(), 1)
 })
 

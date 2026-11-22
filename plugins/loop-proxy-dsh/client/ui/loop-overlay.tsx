@@ -88,7 +88,7 @@ function roleLabel(t: LoopOverlayProps['t'], role: ProjectChoice['role']): strin
     manage: 'dialog.role.manage',
     owner: 'dialog.role.owner',
   }
-  return t(key[role])
+  return Object.hasOwn(key, role) ? t(key[role]!) : role
 }
 
 function StatusError({

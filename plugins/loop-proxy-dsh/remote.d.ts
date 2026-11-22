@@ -58,7 +58,7 @@ export type BeginBindValue = {
     readonly projectId: string
     readonly projectName: string
     readonly defaultChannelId: string
-    readonly role: "view" | "edit" | "manage" | "owner"
+    readonly role: string
   }[]
   readonly agents?: readonly {
     readonly agentId: string
@@ -95,7 +95,7 @@ export type ProjectChoice = {
   readonly projectId: string
   readonly projectName: string
   readonly defaultChannelId?: string
-  readonly role: "view" | "edit" | "manage" | "owner"
+  readonly role: string
 }
 export type ConfirmedProjectChoice = ProjectChoice & { readonly defaultChannelId: string }
 export type GlobalPageRequest = Record<never, never>

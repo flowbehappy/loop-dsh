@@ -1,9 +1,13 @@
 # Knowledge and remote Skills
 
-If the current user message includes a / selection, it limits the knowledge/Skill
-scope for that message. Without one, discover only the resources needed for the
-request through the authorized catalog. A later message does not inherit a prior
-knowledge selection. If the Host already supplied the chosen Skill's instructions,
+A / selection identifies the library or Skill the user is asking about. Loop
+authorizes each action for the connected identity. For an inventory, use
+`kb.list` with the requested `kbIds` to discover sources and `kb.doc-list`
+with each requested `kbId` for online documents. Online documents have their own
+listing even when the only source returned by `kb.list` is a hosted file library.
+Check both lists before reporting what the library contains. Use `kb.file-list` for hosted
+file sources and `kb.repo-tree` for Git sources, following their pagination.
+Use keyword retrieval when looking for relevant passages. If the Host already supplied the chosen Skill's instructions,
 read only the supporting files needed for this task.
 
 For discovery, use `loop-proxy actions skill.` or `loop-proxy actions kb.`, then
