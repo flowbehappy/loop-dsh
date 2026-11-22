@@ -4,7 +4,7 @@
 
 ## 安装和登录
 
-1. **下载安装 DSH 桌面端。** 在 [DeepSeek Harness 官网](https://deepseek.com/harness/)选择「下载桌面端」，或直接使用下面的官方下载链接。已有兼容版本（`>=0.2.2-rc.1 <0.3.0`）可跳到第 2 步。
+1. **下载安装 DSH 桌面端。** 在 [DeepSeek Harness 官网](https://deepseek.com/harness/)选择「下载桌面端」，或直接使用下面的官方下载链接。已有兼容版本（`>=0.2.2-rc.1`）可跳到第 2 步。
    - [macOS（Apple 芯片）](https://download.deepseek.com/desktop/dsh-latest-macos-arm64.dmg)：打开 `.dmg`，将 DeepSeek Harness 拖入「应用程序」，然后打开它。
    - [Windows（64 位 x64）](https://download.deepseek.com/desktop/dsh-latest-windows-x64.exe)：运行 `.exe`，按提示安装，然后打开 DeepSeek Harness。
 2. **下载 Loop 插件。** [下载 loop-dsh.tgz](https://github.com/flowbehappy/loop-dsh/releases/latest/download/loop-dsh.tgz)，保留原文件，无需解压。

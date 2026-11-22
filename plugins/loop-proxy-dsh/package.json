@@ -1,6 +1,6 @@
 {
   "name": "@pingkai/loop-dsh",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Trusted DeepSeek Harness Web and Desktop bridge for an operator-bound Loop connection",
   "type": "module",
   "main": "host.mjs",
@@ -72,20 +72,20 @@
   "license": "Proprietary",
   "engines": {
     "node": "^22.19.0 || >=24.0.0",
-    "dsh": ">=0.2.2-rc.1 <0.3.0"
+    "dsh": ">=0.2.2-rc.1"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.5 <5.0.0",
-    "@deepseek-ai/dsh-llm": ">=0.2.2-rc.1 <0.3.0",
-    "@deepseek-ai/dsh-llm-pi-ai": ">=0.2.2-rc.1 <0.3.0",
-    "@deepseek-ai/dsh-session-query": ">=0.2.2-rc.1 <0.3.0",
-    "@deepseek-ai/dsh-session-telemetry": ">=0.2.2-rc.1 <0.3.0",
-    "@deepseek-ai/dsh-skill": ">=0.2.2-rc.1 <0.3.0",
-    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.1 <0.3.0",
-    "@deepseek-ai/dsh-typert-protocol": ">=0.2.2-rc.1 <0.3.0",
+    "@deepseek-ai/dsh-llm": ">=0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm-pi-ai": ">=0.2.2-rc.1",
+    "@deepseek-ai/dsh-session-query": ">=0.2.2-rc.1",
+    "@deepseek-ai/dsh-session-telemetry": ">=0.2.2-rc.1",
+    "@deepseek-ai/dsh-skill": ">=0.2.2-rc.1",
+    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.1",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.2.2-rc.1",
     "@deepseek-ai/schemastery": ">=3.18.5 <4.0.0",
     "@earendil-works/pi-ai": "^1.1.0",
-    "@deepseek-ai/dsh-credentials": ">=0.2.2-rc.1 <0.3.0"
+    "@deepseek-ai/dsh-credentials": ">=0.2.2-rc.1"
   },
   "dsh": {
     "bundle": {
