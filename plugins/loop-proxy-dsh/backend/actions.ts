@@ -53,3 +53,52 @@ export class ActionClient {
     return this.http.request("POST", actionPath(id) + "/invocations", args, signal)
   }
 }
+
+// Use the Agent-visible directory only. A directory entry identifies a channel;
+// ordinary Agent reads and scoped Human reads still enforce their respective ACLs.
+export async function readNamedChannel(client: ActionClient, args: Record<string,unknown>, prepare: boolean, signal?: AbortSignal, priorDenial?: LoopError) {
+  const {channelName, ...history} = args
+  const name = typeof channelName === "string" ? channelName.trim() : ""
+  if (!name || name.length > 200 || Object.hasOwn(history, "target")) {
+    throw new LoopError("validation", "Supply one channel name or #slug.", 400)
+  }
+  const result = await client.invoke("workspace.list", {kind:"channels",channelName:name,limit:10}, signal)
+  const page = result?.data?.data
+  if (!Array.isArray(page?.channels)) throw new LoopError("loop-host/backend-invalid", "Invalid Loop channel directory.")
+  if (!page.channels.length) throw new LoopError("channel_not_found", "No matching channel was found. Ask the user for its exact name or #slug.")
+  if (page.hasMore || page.channels.length > 1) {
+    const choices = page.channels.map((row: {name:string}) => "#"+row.name).join(", ")
+    throw new LoopError("channel_ambiguous", "Several channels match. Ask which channel the user means: "+choices)
+  }
+  const [channel] = page.channels
+  const label = name.toLowerCase()
+  const slug = label.startsWith("#") ? label.slice(1) : label.replace(/\s+/gu,"-")
+  if (!/^chn_[a-z0-9]+$/u.test(channel?.channelId ?? "") || typeof channel.name !== "string" ||
+      channel.name !== slug && (name.startsWith("#") || channel.displayName?.toLowerCase() !== label)) {
+    throw new LoopError("loop-host/backend-invalid","Loop did not resolve the requested channel to an exact ID.")
+  }
+  const target = "#"+channel.name
+  let direct
+  try {
+    if (priorDenial) throw priorDenial
+    direct = await client.invoke("message.history", {...history,target}, signal)
+  } catch (error) {
+    if (!prepare || !(error instanceof LoopError) || error.outcomeUnknown || !permissionDenied(error)) throw error
+    const canonical = "channel:"+channel.channelId
+    const delegationArguments = {...history,target:canonical}
+    const delegation = await client.delegationPreview("message.history",delegationArguments,signal)
+    if (delegation?.action !== "message.history" || delegation.write !== false || delegation.manage !== false ||
+        delegation.workspaceWide !== false || delegation.resourceConstraints?.length !== 1 || delegation.resourceConstraints[0] !== canonical) {
+      throw new LoopError("loop-host/backend-invalid","Loop did not confirm read-only authorization for the requested channel.")
+    }
+    return {error:{code:error.code,message:error.message},delegation,delegationArguments,channelLabel:channel.displayName || target}
+  }
+  if (direct?.data?.data?.targetKey !== channel.channelId) {
+    throw new LoopError("loop-host/conflict", "The returned history does not match the selected Loop channel.")
+  }
+  return direct
+}
+
+export function permissionDenied(error: LoopError) {
+  return error.status === 403 && ["action_not_granted","resource_not_granted","forbidden_scope","forbidden","action_unavailable"].includes(error.code)
+}

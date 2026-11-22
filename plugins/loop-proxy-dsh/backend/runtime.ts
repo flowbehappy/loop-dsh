@@ -16,7 +16,7 @@ import {randomUUID,randomBytes,createHash} from "node:crypto"
 import {HostCredentialStore, serviceURL} from "./credentials.ts"
 import type {CredentialProvider, Credential} from "./credentials.ts"
 import {TokenManager, LoopHTTP} from "./http.ts"
-import {ActionClient} from "./actions.ts"
+import {ActionClient, readNamedChannel} from "./actions.ts"
 import {beginHostLogin} from "./oauth.ts"
 import type {HostLogin} from "./oauth.ts"
 import {LoopError, requireActive} from "./errors.ts"
@@ -170,6 +170,9 @@ export class LoopBackend {
   }
   delegationPreview(context: ActionContext, name: string, args: Record<string,unknown> | undefined, signal?: AbortSignal) {
     return this.action(context, signal, (client, combined) => client.delegationPreview(name, args, combined))
+  }
+  channelHistory(context: ActionContext, args: Record<string,unknown>, prepare: boolean, signal?: AbortSignal, priorDenial?: LoopError) {
+    return this.action(context, signal, (client, combined) => readNamedChannel(client,args,prepare,combined,priorDenial))
   }
   describe(context: ActionContext, name: string, signal?: AbortSignal) {
     return this.action(context, signal, (client, combined) => client.describe(name, combined))

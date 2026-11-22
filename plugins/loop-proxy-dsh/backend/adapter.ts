@@ -1,3 +1,4 @@
+import {permissionDenied} from "./actions.ts"
 import {cleanupDisconnectedState} from "./disconnect-cleanup.ts"
 import {createHash,randomUUID} from "node:crypto"
 import {join} from "node:path"
@@ -350,14 +351,21 @@ export class NativeHostActions {
       case "agentSchema":
       case "agentAction": {
         if(action==="agentAction" && (!input.workspaceId || !input.sessionId))throw new LoopError("loop-host/invalid-request","Host Workspace and Session are required")
+        if (action==="agentAction" && input.name==="message.history" && Object.hasOwn(input.arguments ?? {}, "channelName")) {
+          return this.backend.channelHistory(context,input.arguments,Boolean(input.prepareDelegation),combined)
+        }
         try {
           return action==="agentSchema" ? await this.backend.describe(context,input.name,combined)
             : await this.backend.invoke(context,input.name,input.arguments??{},combined)
         } catch (error) {
           if (!input.prepareDelegation || !(error instanceof LoopError) || error.outcomeUnknown) throw error
-          const denied = error.status===403 && ["action_not_granted","resource_not_granted","forbidden_scope","forbidden","action_unavailable"].includes(error.code)
+          const denied = permissionDenied(error)
           const missing = error.status===404 && error.code==="unknown_action"
           if (!denied && !missing) throw error
+          if (denied && action==="agentAction" && input.name==="message.history" && /^#[a-z0-9][a-z0-9-]*$/u.test(input.arguments?.target)) {
+            const {target,...page} = input.arguments
+            return this.backend.channelHistory(context,{...page,channelName:target},true,combined,error)
+          }
           try {
             const delegation = await this.backend.delegationPreview(context,input.name,input.delegationArguments,combined)
             if (delegation?.action!==input.name) throw error

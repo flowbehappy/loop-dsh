@@ -57,6 +57,7 @@ import {randomUUID} from 'node:crypto'
 import {createServer} from 'node:http'
 import {once} from 'node:events'
 import {setTimeout as delay} from 'node:timers/promises'
+import {prepareChannelJourney} from ${JSON.stringify(new URL('./native-dsh-channel-fixture.mjs',import.meta.url).href)}
 import {prepareBusinessJourney} from ${JSON.stringify(new URL('./native-dsh-business-fixture.mjs',import.meta.url).href)}
 export const name='native-runtime-test'
 export const inject=['loopHostActions','loopNativeSyncWriterFactory','sessionController','workspaceRegistry','credentials','loopHostService']
@@ -81,7 +82,7 @@ export async function apply(ctx){
    await trace("registration");const registered=await api('POST','/api/v1/auth/register',{name:'native_'+randomUUID().slice(0,8),email:'native-'+randomUUID()+'@example.com',password})
    token=registered.accessToken
    if(!registered.user.emailVerified){const mailbox=await api('GET','/internal/e2e/mailbox/latest?kind=verify&email='+encodeURIComponent(registered.user.email));await api('POST','/api/v1/auth/verify-email',{token:mailbox.token})}
-   let upstreamCalls=0,upstreamError='',business
+   let upstreamCalls=0,upstreamError='',business,channelJourney
    const upstream=createServer(async(req,res)=>{
     try{
      assert.equal(req.url,'/v1/chat/completions');assert.equal(req.headers.authorization,'Bearer isolated-model-key')
@@ -90,7 +91,7 @@ export async function apply(ctx){
      upstreamCalls++
      const nl=String.fromCharCode(10),event=value=>'data: '+JSON.stringify(value)+nl+nl
      res.writeHead(200,{'Content-Type':'text/event-stream'})
-     const call=business?.next(input)
+     const call=channelJourney ? channelJourney.next(input) : business?.next(input)
      res.write(event({id:'test-completion',object:'chat.completion.chunk',created:1,model:'native-test-model',choices:[{index:0,delta:call?{role:'assistant',tool_calls:[call]}:{role:'assistant',content:'NATIVE_DSH_MODEL_OK'},finish_reason:null}]}))
      res.end(event({id:'test-completion',object:'chat.completion.chunk',created:1,model:'native-test-model',choices:[{index:0,delta:{},finish_reason:call?'tool_calls':'stop'}],usage:{prompt_tokens:12,completion_tokens:6,total_tokens:18}})+'data: [DONE]'+nl+nl)
     }catch(error){upstreamError=String(error);res.writeHead(500).end()}
@@ -167,6 +168,21 @@ export async function apply(ctx){
      await business.verify()
      result.business=true
    }
+   if(method==="browser" && process.env.LOOP_TS_E2E_CHANNEL==="1"){
+     const control=new AbortController();ctx.effect(()=>()=>control.abort())
+     channelJourney=await prepareChannelJourney(api,workspace,ctx.loopHostService,result.session.sessionId,control.signal)
+     for(const [i,scenario] of channelJourney.scenarios.entries()){
+       await trace("channel scenario "+i)
+       await ctx.sessionController.prompt({sessionId:result.session.sessionId,requestId:randomUUID(),content:[{type:'text',text:scenario.prompt}]},AbortSignal.timeout(20000))
+       const done=await ctx.sessionController.wait({sessionId:result.session.sessionId,timeoutMs:20000},AbortSignal.timeout(25000))
+       assert.equal(upstreamError,'')
+       assert.ok(JSON.stringify(done.output).includes("NATIVE_DSH_MODEL_OK"))
+       channelJourney.verifyTurn()
+     }
+     control.abort()
+     result.channelScenarios=channelJourney.scenarios.length
+     channelJourney=undefined
+   }
    await trace('sync-receipt')
    let uploaded
    const syncTarget=await hostRuntime.sessionSyncTarget(result.session.sessionId)
@@ -235,6 +251,7 @@ export async function apply(ctx){
   if(method==='browser' && process.env.LOOP_TS_E2E_BUSINESS==='1')assert.equal(result.business,true)
   if(publicOrigin)assert.deepEqual(result.worksite,{relay:true,launch:true,remoteHost:true,remoteOAuth:true})
   if(base)assert.deepEqual(result.realLoop,{method,account:true,modelCatalog:true,sessionAction:true,modelStream:true,telemetrySync:true,disconnect:true})
+  if(method==="browser" && process.env.LOOP_TS_E2E_CHANNEL==="1") {assert.equal(result.channelScenarios,8);t.diagnostic("8 channel history and authorization scenarios verified")}
   const worksite=publicOrigin
     ? `enabled(relay=${result.worksite?.relay===true},launch=${result.worksite?.launch===true},remoteHost=${result.worksite?.remoteHost===true},remoteOAuth=${result.worksite?.remoteOAuth===true})`
     : 'not-requested'

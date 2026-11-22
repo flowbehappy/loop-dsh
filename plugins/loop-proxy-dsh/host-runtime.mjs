@@ -1717,8 +1717,8 @@ export class LoopHostRuntime {
     const {workspace, loopWorkspaceId} = await this.businessWorkspace(sessionId)
     const preparation = prepareDelegation ? {prepareDelegation:true,
       ...(command.verb === "call" ? {delegationArguments:JSON.parse(command.input)} : {})} : {}
-    const permissionResult = ({error,delegation}) => command.verb === "call"
-      ? {failed:true,output:boundedJSON({error}),delegation}
+    const permissionResult = ({error,delegation,delegationArguments,channelLabel}) => command.verb === "call"
+      ? {failed:true,output:boundedJSON({error}),delegation,delegationArguments,channelLabel}
       : {failed:false,output:boundedJSON({id:command.name,requiresHumanAuthorization:true,inputSchema:delegation.inputSchema,
           next:"For the user's requested operation, use loop-proxy call with these concrete arguments. The Host asks the user for approval in this conversation."})}
     if (command.verb === "actions") {
