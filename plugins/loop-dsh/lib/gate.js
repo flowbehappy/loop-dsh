@@ -57,6 +57,11 @@ export class SessionSyncGate {
       const target = await this.target(sessionID)
       if (!target) throw new Error("Upload is not ready")
       if (this.closed) return
+      if (target.state === "off") {
+        if (!job.dirty) this.jobs.delete(sessionID)
+        this.onStatus(sessionID, "idle")
+        return
+      }
       this.onStatus(sessionID, "uploading")
       const more = await job.capture(target)
       if (this.closed) return

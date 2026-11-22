@@ -1214,6 +1214,8 @@ window.__ModuleLoader__.load({
           return t("error.credentialUnavailable");
         case "loop-host/timeout":
           return t("error.timeout");
+        case "loop-host/login-discovery":
+          return t("error.loginDiscovery");
         case "loop/server-url-invalid":
           return t("error.serverUrl");
         case "loop-host/workspace-required":
@@ -5272,6 +5274,7 @@ window.__ModuleLoader__.load({
       "dialog.role.manage": "Manager",
       "dialog.role.owner": "Owner",
       "dialog.syncTitle": "This session",
+      "dialog.syncNoChannel": "Upload is off. This conversation has no upload channel.",
       "dialog.syncStatus": "Sync status",
       "dialog.syncDescription": "New sessions from this Loop project workspace sync automatically. Only visible messages are shared; you can pause this session here.",
       "dialog.syncToggle": "Sync this session to Loop",
@@ -5415,6 +5418,7 @@ window.__ModuleLoader__.load({
       "error.transport": "Loop could not be reached. Check the Loop server connection in Settings \u2192 Loop, then try again.",
       "error.backendUnavailable": "The Loop service is unavailable. Check Settings \u2192 Loop and the server connection, then try again.",
       "error.timeout": "Loop took too long to respond. Check the server connection in Settings \u2192 Loop, then try again.",
+      "error.loginDiscovery": "This address returned a web page for the login service. Check your team\u2019s Loop server address.",
       "error.serverUrl": "Enter a full HTTPS address. Local services can use HTTP.",
       "error.workspaceRequired": "Open a Loop module, choose the Loop workspace once, then connect this project.",
       "error.hostUpdate": "Update the Loop plugin and try again.",
@@ -5800,6 +5804,7 @@ window.__ModuleLoader__.load({
       "dialog.role.manage": "\u53EF\u7BA1\u7406",
       "dialog.role.owner": "\u6240\u6709\u8005",
       "dialog.syncTitle": "\u6B64\u4F1A\u8BDD",
+      "dialog.syncNoChannel": "\u6B64\u5BF9\u8BDD\u6CA1\u6709\u4E0A\u4F20\u9891\u9053\uFF0C\u4E0A\u4F20\u5DF2\u5173\u95ED\u3002",
       "dialog.syncStatus": "\u540C\u6B65\u72B6\u6001",
       "dialog.syncDescription": "\u6B64 Loop \u9879\u76EE\u5DE5\u4F5C\u533A\u7684\u65B0\u4F1A\u8BDD\u4F1A\u81EA\u52A8\u540C\u6B65\uFF1B\u8FD9\u91CC\u53EA\u540C\u6B65\u53EF\u89C1\u6D88\u606F\uFF0C\u4E5F\u53EF\u4EE5\u6682\u505C\u5F53\u524D\u4F1A\u8BDD\u3002",
       "dialog.syncToggle": "\u540C\u6B65\u6B64\u4F1A\u8BDD\u5230 Loop",
@@ -5943,6 +5948,7 @@ window.__ModuleLoader__.load({
       "error.transport": "\u65E0\u6CD5\u8FDE\u63A5 Loop\u3002\u8BF7\u68C0\u67E5\u201C\u8BBE\u7F6E \u2192 Loop\u201D\u4E2D\u7684\u670D\u52A1\u5668\u8FDE\u63A5\u540E\u91CD\u8BD5\u3002",
       "error.backendUnavailable": "Loop \u670D\u52A1\u6682\u4E0D\u53EF\u7528\u3002\u8BF7\u68C0\u67E5\u201C\u8BBE\u7F6E \u2192 Loop\u201D\u548C\u670D\u52A1\u5668\u8FDE\u63A5\u540E\u91CD\u8BD5\u3002",
       "error.timeout": "Loop \u54CD\u5E94\u8D85\u65F6\u3002\u8BF7\u68C0\u67E5\u201C\u8BBE\u7F6E \u2192 Loop\u201D\u4E2D\u7684\u670D\u52A1\u5668\u8FDE\u63A5\u540E\u91CD\u8BD5\u3002",
+      "error.loginDiscovery": "\u8FD9\u4E2A\u5730\u5740\u7684\u767B\u5F55\u63A5\u53E3\u8FD4\u56DE\u4E86\u7F51\u9875\u3002\u8BF7\u6838\u5BF9\u56E2\u961F\u63D0\u4F9B\u7684 Loop \u670D\u52A1\u5730\u5740\u3002",
       "error.serverUrl": "\u8BF7\u8F93\u5165\u5B8C\u6574\u7684 HTTPS \u7F51\u5740\uFF1B\u672C\u673A\u670D\u52A1\u53EF\u4F7F\u7528 HTTP\u3002",
       "error.workspaceRequired": "\u8BF7\u6253\u5F00\u4EFB\u4E00 Loop \u6A21\u5757\uFF0C\u5B8C\u6210\u4E00\u6B21 Loop \u5DE5\u4F5C\u533A\u9009\u62E9\uFF0C\u518D\u8FDE\u63A5\u6B64\u9879\u76EE\u3002",
       "error.hostUpdate": "\u8BF7\u66F4\u65B0 Loop \u63D2\u4EF6\u540E\u91CD\u8BD5\u3002",

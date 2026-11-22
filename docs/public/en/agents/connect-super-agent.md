@@ -8,7 +8,7 @@ Download and install the desktop app for your platform from the [DeepSeek Harnes
 
 ## Sign in and authorize
 
-Open More → Sign in in DSH, enter your team’s Loop server address (for example, `https://loop.pingkai.cn`), and complete authorization in the external browser. Each installation stores one credential pair through the DSH provider. Agent actions, models and conversation uploads share that connection while retaining their server-side purpose and resource checks. Installations can be revoked independently. Embedded pages and Worksite retain separate authorization boundaries.
+Open More → Sign in in DSH, enter your team’s Loop server address (for example, `https://loop.pingcap.cn`), and complete authorization in the external browser. Each installation stores one credential pair through the DSH provider. Agent actions, models and conversation uploads share that connection while retaining their server-side purpose and resource checks. Installations can be revoked independently. Embedded pages and Worksite retain separate authorization boundaries.
 
 Manage action and resource access under Personal assistant in Loop account settings. Reading, writing, models and uploads are enabled by default; deletion and management are disabled. Describe the task normally. If the assistant lacks permission and Loop supports personal authorization for that action, the assistant asks for your approval in the same conversation. Select Review in Loop in the conversation, then review the exact scope, expiry and reuse in the browser. The originating task receives the decision automatically. Manage existing grants in Loop account settings. Business management and installed App actions retain separate authorization.
 

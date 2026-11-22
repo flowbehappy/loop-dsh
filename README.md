@@ -9,7 +9,7 @@
    - Windows（64 位 x64）：运行 `.exe`，按提示安装，然后打开 DeepSeek Harness。
 2. **下载 Loop 插件。** 前往 [Loop 插件发布页](https://github.com/flowbehappy/loop-dsh/releases)，选择标有 **Latest** 的版本，在 **Assets** 下下载 `loop-dsh.tgz`，无需解压。
 3. **安装插件。** 打开 DSH 的「插件 → 添加插件 → 安装第三方插件」，在「包名或地址」中填入下载文件的绝对路径，确认安装。若提示 `koffi` 需要运行安装脚本，核对包名后选择「允许这些脚本并重试」。按 DSH 提示重启。
-4. **登录 Loop。** 从 DSH 左下角「更多 → 登录」进入，填入团队的 Loop 服务地址（例如 `https://loop.pingkai.cn`），选择工作区，在浏览器完成登录和授权，然后回到 DSH。
+4. **登录 Loop。** 从 DSH 左下角「更多 → 登录」进入，填入团队的 Loop 服务地址（例如 `https://loop.pingcap.cn`），选择工作区，在浏览器完成登录和授权，然后回到 DSH。
 
 命令行安装可在下载目录运行 `dsh plugin --profile web add ./loop-dsh.tgz --allow-build=koffi`。桌面端先打开一次应用并完全退出，再把命令中的 `web` 换成 `desktop`，安装后重新打开。
 

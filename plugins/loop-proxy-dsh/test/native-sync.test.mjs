@@ -56,6 +56,24 @@ test('restart discovery admits only matching active remote sessions with durable
   await resumed[0].flush()
   assert.deepEqual(await SyncOutbox.resumable(f.root,'profile',credential,f.api),[])
 })
+test('restart checks the saved destination for queued project uploads', async t => {
+  const old = {kind:'project_session',targetId:'project',channelId:'channel'}
+  const f = await fixture(t, ({path}) => path === '/sessions' ? {
+    syncSessionId:'remote',workspaceId:'workspace',placement:old,
+    participants:[{kind:'agent',principalId:'agent',verified:true}],
+  } : undefined)
+  await f.outbox.ensureSession(old,'workspace','agent')
+  await f.outbox.record([event(1)])
+  const recover = check => SyncOutbox.resumable(f.root,'profile',credential,f.api,check)
+  assert.deepEqual(await recover(), [])
+  assert.deepEqual(await recover(async () => false), [])
+  assert.equal((await recover(async (...route) => {
+    assert.deepEqual(route,['session','project','channel'])
+    return true
+  })).length, 1)
+  assert.equal((await f.outbox.snapshot()).pending.length, 1)
+})
+
 test('pending capture has no upload authority and only exact unexpired context can adopt it',async t=>{
   const f=await fixture(t),context={accountPrincipal:'human',loopWorkspaceId:'workspace',agentId:'agent',projectId:'',defaultChannelId:'channel'}
   const pending=SyncOutbox.pending(f.root,'profile','session',context)

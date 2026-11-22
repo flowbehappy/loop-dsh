@@ -18,7 +18,12 @@ import type {HumanOwner} from "./human.ts"
 import {humanSlot} from "./human-oauth.ts"
 
 interface Config {stateHome:string;serviceBaseUrl:string;loopWorkspaceId:string;installationId:string;pageOrigin:string;syncProfile:string;accountPrincipal?:string;authorizationSettings?:string|false}
-interface Options {provider:CredentialProvider;fetch?:typeof fetch;syncHome?:string}
+interface Options {
+  provider: CredentialProvider
+  fetch?: typeof fetch
+  syncHome?: string
+  canResumeProjectUpload?: (route: {account:string;server:string;workspace:string;sessionId:string;projectId:string;channelId:string}) => Promise<boolean>
+}
 /** Implements the existing Host action transport directly. This adapter is
  * injected into the existing facade; it never spawns or falls back to Go. */
 export class NativeHostActions {
@@ -92,7 +97,10 @@ export class NativeHostActions {
       return new SyncOutbox(this.syncHome!,profile,session,current,apiFor(current),pending??undefined)
     },status,async(profile,signal)=>{
       const current=await credential(profile,signal)
-      return current?SyncOutbox.resumable(this.syncHome!,profile,current,apiFor(current)):[]
+      if (!current) return []
+      return SyncOutbox.resumable(this.syncHome!,profile,current,apiFor(current), async (sessionId, projectId, channelId) =>
+        await this.options.canResumeProjectUpload?.({account:current.principal_id, server:this.config.serviceBaseUrl,
+          workspace:current.workspace_id, sessionId, projectId, channelId}) === true)
     })
     this.writers.add(writer)
     return writer

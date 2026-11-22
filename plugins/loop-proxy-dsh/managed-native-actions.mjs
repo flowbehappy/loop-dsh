@@ -22,6 +22,7 @@ export function apply(ctx) {
     nativeWorkspaceReconciliation: true,
     createHelper: selected => new NativeHostActions(selected, {
       provider: ctx.get("credentials"), syncHome: config.syncHome,
+      canResumeProjectUpload: route => ctx.loopHostService.canResumeProjectUpload(route),
     }),
     onAccountPrincipal: principal => ctx.loopHostService.setAccountPrincipal(principal),
   })

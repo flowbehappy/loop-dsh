@@ -31,6 +31,7 @@ export function failureText(t: LoopMenuTranslate, failure: UiFailure): string {
     case 'loop-host/credential-recovery-disabled': return t('error.credentialRecoveryDisabled')
     case 'loop-host/credential-unavailable': return t('error.credentialUnavailable')
     case 'loop-host/timeout': return t('error.timeout')
+    case 'loop-host/login-discovery': return t('error.loginDiscovery')
     case 'loop/server-url-invalid': return t('error.serverUrl')
     case 'loop-host/workspace-required': return t('error.workspaceRequired')
     case 'loop/host-update-required': return t('error.hostUpdate')

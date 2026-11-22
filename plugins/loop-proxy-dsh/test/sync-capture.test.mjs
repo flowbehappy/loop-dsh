@@ -25,13 +25,15 @@ async function fixture(t, history = false) {
   let includeHistory = history
   let profileChanged
   let invalidate
+  let enabled = true
   let admission = null
   let reads = 0
   const service = {
     syncCapturePolicy: () => ({loggedIn, uploadDisconnectedHistory: includeHistory}),
-    sessionSyncTarget: async () => {
+    sessionSyncAdmission: async () => {
       reads++
       if (admission) await admission
+      if (!enabled) return {state:"off"}
       return loggedIn ? {profile: "loop-test"} : null
     },
     setSessionUploadStatus() {},
@@ -74,6 +76,7 @@ async function fixture(t, history = false) {
     history(value) { includeHistory = value; profileChanged("loop-test") },
     blockAdmission(value) { admission = value },
     reads: () => reads,
+    enable(value) { enabled = value },
   }
 }
 
@@ -115,6 +118,18 @@ test("explicit history opt-in replays accessible history; switching off stops re
   f.append("later signed in")
   await until(() => f.contents().length === 3)
   assert.equal(f.contents().at(-1), "later signed in")
+})
+
+test("disabled uploads release live events without sending them after a later opt-in", async t => {
+  const f = await fixture(t)
+  f.enable(false)
+  f.login()
+  f.append("while off")
+  await until(() => f.reads() > 0)
+  f.enable(true)
+  f.append("after enabling")
+  await until(() => f.contents().length > 0)
+  assert.deepEqual(f.contents(), ["after enabling"])
 })
 
 test("logout fences events whose upload admission is still pending", async t => {

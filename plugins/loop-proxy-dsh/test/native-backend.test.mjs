@@ -431,6 +431,18 @@ test('connection URLs cannot contain credentials or nonlocal plaintext transport
   assert.equal(serviceURL('http://loop.work.localhost:3302/'), 'http://loop.work.localhost:3302')
 })
 
+test('a website served at the OAuth discovery address gives a server-address error before login', async () => {
+  const calls = []
+  const login = beginHostLogin({server:'https://team.example.test',installation:'test',pageOrigin:'dsh-app://app',
+    accessToken:'synthetic',fetch:async (url, init) => {
+      calls.push(url)
+      assert.equal(new Headers(init.headers).has('Authorization'), false)
+      return new Response('<html></html>', {headers:{'Content-Type':'text/html; charset=utf-8'}})
+    }})
+  await assert.rejects(login, {code:'loop-host/login-discovery'})
+  assert.deepEqual(calls,['https://team.example.test/.well-known/oauth-authorization-server/api/v1/auth/oauth'])
+})
+
 async function oauthFixture(t, changes = {}) {
   let f, registration, authorization, exchanges = 0
   f = await fixture(t, async (req, res) => {

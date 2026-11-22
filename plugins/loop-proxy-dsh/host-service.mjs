@@ -354,6 +354,14 @@ export default class LoopHostService extends TypertRemoteService {
     return this.runtime.sessionSyncEnabled(sessionId)
   }
 
+  canResumeProjectUpload(route) {
+    return this.runtime.canResumeProjectUpload(route)
+  }
+
+  sessionSyncAdmission(sessionId) {
+    return this.runtime.sessionSyncAdmission(sessionId)
+  }
+
   sessionSyncTarget(sessionId) {
     return this.runtime.sessionSyncTarget(sessionId)
   }

@@ -63,6 +63,14 @@ export function SyncControl({
       </section>
     )
   }
+  if (sync?.state === 'off' && sync.canEnable === false) {
+    return (
+      <section className={css.section} aria-labelledby="loop-sync-title">
+        <h3 id="loop-sync-title" className={css.sectionTitle}>{t('dialog.syncTitle')}</h3>
+        <p className={css.hint}>{t('dialog.syncNoChannel')}</p>
+      </section>
+    )
+  }
   const reason = context !== null && context.state !== 'inherited'
     ? context.reason === undefined
       ? t('dialog.syncUnavailable')

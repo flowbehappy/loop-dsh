@@ -227,13 +227,28 @@ for(const failure of ['none','create-response','execute-response','model-respons
       assert.ok(picked?.insert)
       assert.match(await source.codec.serialize(picked.insert.ref,signal), /directory="dsh-/)
     }
-    await api('PUT',settingsPath+'/permissions',{revision,permissions:assistant.permissions})
+    const {sync: _sync, ...withoutUpload} = assistant.permissions
+    const noUpload = await api('PUT',settingsPath+'/permissions',{revision,permissions:withoutUpload})
+    assert.equal(await status(sync,credential.access_token),403)
+    const publicRoom = await api('POST',workspacePath+'/channels',{name:'join-without-upload'})
+    await api('PATCH',workspacePath+'/channels/'+publicRoom.id,{visibility:'public'})
+    const joined = await facade.agentAction({workspaceId:'token-managed',sessionId,name:'channel.agent-add',
+      arguments:{channelName:publicRoom.name}})
+    assert.equal(joined.data.data.channelId, publicRoom.id)
+    assert.equal(joined.data.data.joined, true)
+    const members = await api('GET',workspacePath+'/channels/'+publicRoom.id+'/members')
+    assert.equal([...members.agents,...(members.privateAgents ?? [])].filter(member =>
+      (member.agentId ?? member.id) === assistant.agentId).length, 1)
+    await api('PUT',settingsPath+'/permissions',{revision:noUpload.revision,permissions:assistant.permissions})
     assert.equal(await status(models,credential.access_token),200)
     assert.equal(await status(sync,credential.access_token),200)
     const channelId = directoryChannel.defaultChannelId
     const workerDirectory = await facade.collaborationDirectory({sessionId,query:agentName,kinds:['agent']})
     const workerTarget = workerDirectory.entries.find(entry => entry.agentId === worker.id)
     assert.ok(workerTarget)
+    await assert.rejects(facade.agentAction({workspaceId:'token-managed',sessionId,name:'task.create',
+      arguments:{channelName:publicRoom.name,tasks:[{title:'Out-of-channel assignment',assignee:workerTarget.memberId}]}}),
+      error => error.status === 400 && /assignee|member/i.test(error.message))
     const {missingChannelAgents} = await import('../host-collaboration.mjs')
     const roster = () => missingChannelAgents(channelId,[workerTarget], async cursor => {
       const result = await facade.agentAction({workspaceId:'directory-test',sessionId,name:'channel.members',

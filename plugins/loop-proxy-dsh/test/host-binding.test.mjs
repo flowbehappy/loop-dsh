@@ -2139,7 +2139,7 @@ test("ordinary actions preserve server permissions without requiring upload auth
   } finally { rmSync(root, {recursive: true, force: true}) }
 })
 
-test("first Loop use prepares only the missing local workspace and preserves history upload preference", async () => {
+test("context reads leave an unbound workspace alone; collaboration prepares only its own route", async () => {
   const {root, store} = fixture()
   const calls = []
   const workspace = {id: WORKSPACE_ID, path: WORKSPACE, title: "Current", sessionIds: ["session-old"]}
@@ -2166,6 +2166,10 @@ test("first Loop use prepares only the missing local workspace and preserves his
   try {
     const before = await runtime.sessionContext({workspaceId: WORKSPACE_ID, sessionId: "session-old"})
     assert.equal(before.reason, "This Workspace has no Loop binding yet")
+    await assert.rejects(runtime.agentCommand("session-old", {verb: "context"}), /no Loop binding yet/)
+    assert.deepEqual(calls, [])
+    assert.equal(await store.getBinding("account-one", WORKSPACE_ID, WORKSPACE, runtime.serviceBaseUrl), null)
+    await runtime.withSessionContext("session-old", undefined, context => assert.equal(context.defaultChannelId, CHANNEL_ID))
     const result = await runtime.agentCommand("session-old", {verb: "context"})
     assert.equal(JSON.parse(result.output).defaultChannelId, CHANNEL_ID)
     assert.equal(calls.length, 2)
@@ -2299,6 +2303,17 @@ test("legacy Session and binding resolve only from their unique matching revisio
       defaultServiceBaseUrl: serverA,
     })
     runtime.setAccountPrincipal("account-one")
+    const request = {workspaceId: WORKSPACE_ID, sessionId: "session-legacy"}
+    const route = {account: "account-one", server: serverA, workspace: "workspace-loop",
+      sessionId: request.sessionId, projectId: PROJECT_ID, channelId: CHANNEL_ID}
+    assert.equal(await runtime.canResumeProjectUpload(route), true)
+    assert.equal(await runtime.canResumeProjectUpload({...route, channelId: "other"}), false)
+    actions.retrySync = async input => {
+      assert.equal(input.context.defaultChannelId, CHANNEL_ID)
+      return {state:"on",pending:0,historyPartial:false}
+    }
+    assert.equal((await runtime.retrySync(request)).state, "on")
+    assert.equal((await runtime.sessionContext(request)).defaultChannelId, "")
     assert.deepEqual(await runtime.sessionSyncTarget("session-legacy"), {
       profile: "sync-server-a",
       pendingContext: {

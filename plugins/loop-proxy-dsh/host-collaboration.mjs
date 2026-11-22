@@ -2220,6 +2220,10 @@ export class LoopCollaborationRuntime {
           const status = await runtime.call("collaborationStatus", {sessionId: id}, exec.signal)
           runtime.observeStatus(id, status)
           if (status.state === "unbound") {
+            if (action === "list-subscriptions") return {state: "unbound", subscriptions: [], hasMore: false}
+            if (action !== "set-subscription" || args.mode === "paused") {
+              throw failure("loop-collaboration/not-bound", "This Session has no active collaboration binding for that subscription")
+            }
             await runtime.withSessionContext(id, exec.signal, async context => {
               if (!context.defaultChannelId || !context.agent?.id || !context.loopWorkspaceId) throw failure("loop-collaboration/not-bound", "No authorized channel for this Session")
               assertLocalTurn()

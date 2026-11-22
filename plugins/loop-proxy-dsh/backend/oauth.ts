@@ -46,13 +46,20 @@ export async function beginHostLogin(options: LoginOptions): Promise<HostLogin> 
     if (new URL(url).origin !== new URL(base).origin) invalid("Loop OAuth endpoint belongs to another server")
     return url
   }
+  const issuer = base + "/api/v1/auth/oauth"
+  const issuerURL = new URL(issuer)
+  const discoveryURL = issuerURL.origin + "/.well-known/oauth-authorization-server" + issuerURL.pathname
   async function request(url: string, init: RequestInit = {}) {
     requireActive(signal)
     try {
       const response = await fetcher(endpoint(url), {...init, redirect: "error", signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)])})
+      if (url === discoveryURL && response.ok && response.headers.get("content-type")?.toLowerCase().startsWith("text/html")) {
+        await response.body?.cancel()
+        throw new LoopError("loop-host/login-discovery", "The server returned a web page at its OAuth discovery address. Check your team's Loop server address.")
+      }
       if (!response.ok) {
         await response.body?.cancel()
-        if (options.accessToken && [401, 403].includes(response.status)) {
+        if (new Headers(init.headers).has("Authorization") && [401, 403].includes(response.status)) {
           throw new LoopError("loop-host/needs-auth", "DSH access token was rejected")
         }
         invalid("Loop OAuth request was rejected")
@@ -64,9 +71,7 @@ export async function beginHostLogin(options: LoginOptions): Promise<HostLogin> 
       throw new LoopError("loop-host/backend-unavailable", "Loop OAuth request did not complete")
     }
   }
-  const issuer = base + "/api/v1/auth/oauth"
-  const issuerURL = new URL(issuer)
-  const metadata = await request(issuerURL.origin + "/.well-known/oauth-authorization-server" + issuerURL.pathname)
+  const metadata = await request(discoveryURL)
   if (metadata.issuer !== issuer) invalid("Loop authorization-server issuer mismatch")
   endpoint(metadata.authorization_endpoint)
   const registrationEndpoint = endpoint(metadata.registration_endpoint)

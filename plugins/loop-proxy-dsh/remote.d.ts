@@ -153,6 +153,7 @@ export type SyncStatusValue = {
   }
   readonly pending: number
   readonly health?: "idle" | "pending" | "retrying" | "error" | "unsupported"
+  readonly canEnable?: boolean
   readonly historyPartial: boolean
   readonly reason?: string
   readonly challenge?: {

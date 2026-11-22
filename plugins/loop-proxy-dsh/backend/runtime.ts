@@ -173,7 +173,12 @@ export class LoopBackend {
   }
   joinChannel(context: ActionContext, name: unknown, signal?: AbortSignal) {
     return this.action(context, signal, (client, combined, tokens) => joinNamedChannel(client, name, async () => {
-      const {principal} = await hostSyncPrincipal(new HostAPI(tokens, this.options.fetch), combined)
+      const api = new HostAPI(tokens, this.options.fetch)
+      const account = new AccountService(api, this.options.installation, this.options.pageOrigin)
+      const id = await account.assistantId(combined)
+      if (id) return id
+      // Older Loop servers omitted the assistant ID from the account response.
+      const {principal} = await hostSyncPrincipal(api, combined)
       return principal.agentId
     }, combined), true)
   }

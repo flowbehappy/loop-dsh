@@ -67,7 +67,8 @@ export class SyncOutbox {
     outbox.pendingCapture={context:clone(context),expiresAt:new Date(Date.now()+24*60*60_000).toISOString()}
     return outbox
   }
-  static async resumable(root:string,profile:string,credential:Credential,api:HostAPI):Promise<SyncOutbox[]>{
+  static async resumable(root:string,profile:string,credential:Credential,api:HostAPI,
+    canResumeProject?: (sessionId:string, projectId:string, channelId:string) => Promise<boolean>):Promise<SyncOutbox[]>{
     if(!/^[a-zA-Z0-9_.-]+$/u.test(profile)||[".",".."].includes(profile))fail("Invalid sync profile")
     const directory=join(root,"outbox",profile)
     let entries
@@ -87,7 +88,9 @@ export class SyncOutbox {
       const state=outbox.load(raw)
       // A saved remote session is the durable admission proof. Merely
       // possessing a credential never admits pre-consent captured events.
-      if(state.syncSessionId && state.syncState==="active" && state.pending.length)result.push(outbox)
+      if (!state.syncSessionId || state.syncState !== "active" || !state.pending.length) continue
+      if (state.projectId && !await canResumeProject?.(outbox.sessionId, state.projectId, state.defaultChannelId)) continue
+      result.push(outbox)
     }
     return result
   }

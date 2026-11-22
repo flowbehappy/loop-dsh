@@ -33,7 +33,7 @@ loop-proxy call task.get {"taskId":"<returned-task-id>"}
 
 Inspect the exact action even if the prefix list is empty. Use its returned
 schema and recovery instruction. Read `loop-proxy context` when the current
-Agent, project or channel matters. Preserve IDs and receipts. An accepted
+saved project or channel matters. If the Session has no saved channel, ask which channel the user means when the action needs one. An explicitly named destination can be resolved directly. Preserve IDs and receipts. An accepted
 dispatch may still be running. Check uncertain writes before retrying.
 
 ## Read the relevant guide when needed

@@ -2617,8 +2617,10 @@ test("subscription route recovery retains only current local evidence for the sa
       const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 500)
       try {
         if (scenario === "list first") {
-          await f.tool("collaboration_list_subscriptions").execute({}, f.exec)
-          f.actions.collaborationStatus = async () => ({state: "ready", scope: f.scope})
+          const list = await f.tool("collaboration_list_subscriptions").execute({}, f.exec)
+          assert.deepEqual(list, {state: "unbound", subscriptions: [], hasMore: false})
+          await assert.rejects(f.tool("collaboration_read_updates").execute({subscriptionId:"cos_old"}, f.exec), /no active collaboration binding/)
+          await assert.rejects(f.tool("collaboration_set_subscription").execute({target:"#discussion",mode:"paused"}, f.exec), /no active collaboration binding/)
         }
         const attempt = f.tool("collaboration_set_subscription").execute({target: "#discussion", mode: "push"}, {...f.exec, signal: controller.signal})
         if (["same route", "list first"].includes(scenario)) {

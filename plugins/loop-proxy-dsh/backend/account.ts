@@ -4,6 +4,7 @@ import {LoopError} from "./errors.ts"
 
 export interface AccountSession {
   principalId: string; workspaceId: string; grantId: string; accountName: string
+  agentId?: string
   deviceOnly?: true
   pageLaunch?: string; pageOrigin?: string; expiresIn?: number
 }
@@ -28,25 +29,32 @@ export class AccountService {
     }
     let result
     try {
-      result = await this.api.request("account", "POST", "/session", body, signal, {reauthenticate: true})
+      result = await this.inspect(credential, body, signal)
     } catch (error) {
       // Older servers reject the new status field. Their original device session
       // remains usable, including after an unsuccessful page authorization.
       if (body.pageConsent !== "status" || !(error instanceof LoopError) || error.status !== 400) throw error
-      result = await this.api.request("account", "POST", "/session", {
-        workspaceId: credential.workspace_id, installationId: this.installation,
-      }, signal, {reauthenticate: true})
+      result = await this.inspect(credential, {workspaceId: credential.workspace_id, installationId: this.installation}, signal)
     }
-    this.validateIdentity(result, credential)
     if (resumePage && (typeof result.pageLaunch !== "string" || !result.pageLaunch || result.pageOrigin !== this.pageOrigin || !Number.isSafeInteger(result.expiresIn) || result.expiresIn <= 0)) {
       throw new LoopError("loop-host/backend-invalid", "Loop page recovery is incomplete")
     }
     return tokenDevice && !resumePage && result.pageAuthorized !== true ? {...result, deviceOnly: true} : result
   }
-  private validateIdentity(result: any, credential: Credential): void {
+  async assistantId(signal?: AbortSignal): Promise<string | undefined> {
+    const credential = await this.api.tokens.credential(signal)
+    const {agentId} = await this.inspect(credential, {workspaceId: credential.workspace_id, installationId: this.installation}, signal)
+    if (agentId !== undefined && (typeof agentId !== "string" || !agentId.trim())) {
+      throw new LoopError("loop-host/backend-invalid", "Loop returned an invalid assistant identity")
+    }
+    return agentId
+  }
+  private async inspect(credential: Credential, body: Record<string,string>, signal?: AbortSignal) {
+    const result = await this.api.request("account", "POST", "/session", body, signal, {reauthenticate: true})
     if (result?.principalId !== credential.principal_id || result.workspaceId !== credential.workspace_id || result.grantId !== credential.grant_id) {
       throw new LoopError("loop-host/needs-auth", "Loop connection identity changed")
     }
+    return result
   }
   async status(signal?: AbortSignal) {
     const result = await this.session(false, signal)

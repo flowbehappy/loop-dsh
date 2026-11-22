@@ -46,7 +46,7 @@ async function fixture(t) {
 }
 
 test('workspace discovery keeps a bound project without creating a recording channel', async t => {
-  const {runtime,store,workspace,prepared} = await fixture(t)
+  const {runtime,store,workspace,prepared,sessions,actions} = await fixture(t)
   const original = await store.getBinding('human',workspace.id,workspace.path,server)
   const project = await store.putBinding('human',{
     workspaceId:workspace.id,workspacePath:workspace.path,workspaceTitle:workspace.title,expectedRevision:original.revision,
@@ -58,6 +58,20 @@ test('workspace discovery keeps a bound project without creating a recording cha
   assert.equal(prepared.length,count)
   const saved = await store.getBinding('human',workspace.id,workspace.path,server)
   assert.deepEqual([saved.revision,saved.projectId,saved.defaultChannelId],[project.revision,'project-one',''])
+  const request = {workspaceId:workspace.id, sessionId:'project-session'}
+  workspace.sessionIds.push(request.sessionId)
+  sessions.set(request.sessionId, {id:request.sessionId, header:{createdAt:Date.now()+1000}})
+  actions.projectSyncCatalog = () => assert.fail('project telemetry must not discover other workspaces')
+  actions.syncStatus = actions.setSync = actions.retrySync = () => assert.fail('no upload destination')
+  runtime.setSessionUploadStatus(request.sessionId, 'failed')
+  assert.equal((await runtime.syncStatus(request)).canEnable, false)
+  assert.deepEqual(await runtime.sessionSyncAdmission(request.sessionId), {state:'off'})
+  assert.equal((await runtime.retrySync(request)).state, 'off')
+  assert.equal((await runtime.setSync({...request,enabled:false})).sync.canEnable, false)
+  await assert.rejects(runtime.setSync({...request,enabled:true}), /no upload channel/)
+  assert.equal((await runtime.syncStatus(request)).state, 'off')
+  assert.equal(await runtime.canResumeProjectUpload({account:'human',server,workspace:'loop-workspace',
+    sessionId:request.sessionId,projectId:project.projectId,channelId:'old-channel'}), false)
 })
 
 test('Human dispatch pins verified Loop identity and defaults writes to read-only', async t => {

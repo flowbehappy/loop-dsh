@@ -1119,6 +1119,13 @@ export class LoopHostRuntime {
   }
 
   async sessionSyncTarget(sessionId) {
+    const admission = await this.sessionSyncAdmission(sessionId)
+    return admission?.state === "off" ? null : admission
+  }
+
+  // A disabled destination is final for this event. Missing credentials or
+  // an unfinished binding remain retryable.
+  async sessionSyncAdmission(sessionId) {
     if (await this.store.connectionBusy()) return null
     try {
       await this.requireAccount()
@@ -1132,27 +1139,15 @@ export class LoopHostRuntime {
       const workspace = await this.workspaceForSession(sessionId)
       if (workspace === undefined) return null
       const binding = await this.store.getBinding(this.accountPrincipal, workspace.id, workspace.path, this.serviceBaseUrl)
-      if (binding?.placementKind !== "channel_session") {
+      if (binding === null) {
         await this.syncProjects({}, undefined, {background: true})
       }
       record = await this.captureSession(workspace.id, sessionId)
     }
-    if (record === null || record.syncEnabled !== true || !record.defaultChannelId) return null
-    const sessionServer = record.loopServiceBaseUrl ?? ""
-    if (sessionServer === "" ||
-        (this.serviceBaseUrl !== "" && sessionServer !== this.serviceBaseUrl)) {
-      return null
-    }
-    const binding = record.legacyBinding ?? await this.store.getBinding(
-      this.accountPrincipal,
-      record.workspaceId,
-      record.workspacePath,
-      sessionServer,
-    )
-    const enabled = binding !== null && binding.unbinding !== true &&
-      binding.loopServiceBaseUrl === sessionServer &&
-      binding.revision === record.bindingRevision
-    if (!enabled) return null
+    if (record === null) return null
+    if (!record.syncEnabled || !record.defaultChannelId) return {state: "off"}
+    const binding = await this.uploadBinding(this.accountPrincipal, record, this.serviceBaseUrl)
+    if (!binding) return null
     await this.startAutomaticSessionSync(record)
     const syncProfile = await this.currentSyncProfile()
     return syncProfile === "" ? null : {
@@ -1165,6 +1160,23 @@ export class LoopHostRuntime {
         defaultChannelId: record.defaultChannelId,
       },
     }
+  }
+
+  async uploadBinding(account, record, server) {
+    const sessionServer = record.loopServiceBaseUrl
+    if (!sessionServer || (server && sessionServer !== server)) return null
+    const binding = record.legacyBinding ?? await this.store.getBinding(account, record.workspaceId, record.workspacePath, sessionServer)
+    if (!binding || binding.unbinding || binding.repairPending || binding.loopServiceBaseUrl !== sessionServer ||
+        binding.revision !== record.bindingRevision) return null
+    return binding
+  }
+
+  async canResumeProjectUpload({account, server, workspace, sessionId, projectId, channelId}) {
+    const record = await this.store.getSessionByID(account, sessionId)
+    if (!record?.syncEnabled || record.syncPreference !== "on" || record.projectId !== projectId ||
+        !channelId || record.defaultChannelId !== channelId) return false
+    const binding = await this.uploadBinding(account, record, server)
+    return binding?.loopWorkspaceId === workspace && binding.projectId === projectId
   }
 
   setSessionUploadStatus(sessionId, status) {
@@ -1313,10 +1325,18 @@ export class LoopHostRuntime {
     const pending = this.sessionUploadStatuses.get(request.sessionId)
     const base = {pending: 0, historyPartial: false}
     if (this.accountPrincipal === "" || this.actions?.syncStatus === undefined) return {...base, state: "off"}
-    if (pending === "failed") return {...base, state: "error", health: "error"}
-    if (pending === "uploading") return {...base, state: "pending", health: "pending"}
     try {
       const record = await this.store.getSession(this.accountPrincipal, request.workspaceId, request.sessionId)
+      if (record && !record.defaultChannelId) return noUploadChannel()
+      if (!record) {
+        const workspace = this.workspaces.get(request.workspaceId)
+        if (workspace?.sessionIds.includes(request.sessionId) &&
+            (await this.store.getBinding(this.accountPrincipal, workspace.id, workspace.path, this.serviceBaseUrl))?.projectId) {
+          return noUploadChannel()
+        }
+      }
+      if (pending === "failed") return {...base, state: "error", health: "error"}
+      if (pending === "uploading") return {...base, state: "pending", health: "pending"}
       if (record === null) return {...base, state: "pending", health: "pending"}
       return validateSyncStatus(await this.actions.syncStatus({
         ...request, accountPrincipal: this.accountPrincipal, context: syncContext(record),
@@ -1340,8 +1360,9 @@ export class LoopHostRuntime {
     const sessionRecord = await this.store.getSession(
       this.accountPrincipal, request.workspaceId, request.sessionId,
     )
-    if (request.enabled && !sessionRecord?.defaultChannelId) {
-      throw failure("loop-host/conflict", "This Session has no upload channel. Binding a project does not select one.")
+    if (!sessionRecord?.defaultChannelId) {
+      if (!request.enabled) return {sync: noUploadChannel()}
+      throw failure("loop-host/conflict", noUploadChannel().reason)
     }
     const binding = sessionRecord === null
       ? null
@@ -1501,8 +1522,10 @@ export class LoopHostRuntime {
     if (this.actions?.retrySync === undefined) {
       throw failure("loop-host/backend-unavailable", "Host sync is not installed")
     }
+    const record = await this.store.getSession(this.accountPrincipal, request.workspaceId, request.sessionId)
+    if (!record?.defaultChannelId) return noUploadChannel()
     const result = validateSyncStatus(await this.actions.retrySync({
-      ...request, accountPrincipal: this.accountPrincipal, context: syncContext(context),
+      ...request, accountPrincipal: this.accountPrincipal, context: syncContext(record),
     }, signal))
     if (["on", "pending", "off"].includes(result.state)) {
       this.setSessionUploadStatus(request.sessionId, "uploaded")
@@ -1732,9 +1755,10 @@ export class LoopHostRuntime {
       throw failure("loop-host/backend-unavailable", "Loop Agent actions are unavailable")
     }
     if (command.verb === "context") {
-      const {context} = await this.ensureSessionContextLocked(sessionId, signal)
-      if (context.state !== "inherited") throw failure("loop-host/conflict", context.reason)
       if (command.name || command.input) throw failure("loop-host/invalid-request", "Loop context accepts no arguments")
+      const {workspace} = await this.businessWorkspace(sessionId)
+      const context = await this.sessionContextLocked({workspaceId: workspace.id, sessionId}, {forActions: true})
+      if (context.state !== "inherited") throw failure("loop-host/not-bound", context.reason)
       return {failed: false, output: boundedJSON({
         projectId: context.projectId, defaultChannelId: context.defaultChannelId,
         agent: context.agent, loopWorkspaceId: context.loopWorkspaceId,
@@ -2032,6 +2056,10 @@ function helperBinding(binding) {
     accountName: binding.accountName,
     webUrl: binding.webUrl,
   }
+}
+
+function noUploadChannel() {
+  return {state: "off", pending: 0, historyPartial: false, canEnable: false, reason: "This Session has no upload channel. Binding a project does not select one."}
 }
 
 function syncContext(context) {

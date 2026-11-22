@@ -29,9 +29,16 @@ export function apply(ctx, config) {
       const service = typeof ctx.get === "function"
         ? ctx.get("loopHostService")
         : undefined
-      const target = service?.sessionSyncTarget === undefined
-        ? null
-        : await service.sessionSyncTarget(sessionID)
+      const pending = liveEvents.get(sessionID)
+      const observed = pending?.length ?? 0
+      const target = service?.sessionSyncAdmission
+        ? await service.sessionSyncAdmission(sessionID)
+        : await service?.sessionSyncTarget?.(sessionID)
+      if (generation !== captureGeneration) return null
+      if (target?.state === "off" && pending && liveEvents.get(sessionID) === pending) {
+        liveQueued -= pending.splice(0, observed).length
+        if (!pending.length) liveEvents.delete(sessionID)
+      }
       return target ? {...target, generation} : null
     },
     ctx.logger,

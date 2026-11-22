@@ -12,7 +12,7 @@ perspective, request that channel with `loop_channel_history` and `readAs: "huma
 A channel can contain several Agents;
 check all pages of `channel.members` before inviting missing participants.
 For a Human colleague, resolve the workspace `memberId` with the directory
-guide. For a project channel, read the project's linked channel ID. Inspect
+guide. When the user specifies a project channel, resolve the linked channels and clarify the destination if several match. Inspect
 `loop-proxy schema channel.human-member-add` even when the Agent catalog
 omits it. Use the ordinary `loop-proxy call channel.human-member-add` with
 `channelId` and `memberId`; the Host obtains any required personal approval.
