@@ -1,6 +1,6 @@
 # Loop for DeepSeek Harness
 
-在 DeepSeek Harness（DSH）里选用 Loop 工作区的模型，把团队的 Skill 文档交给 Agent，让它按文档完成任务。
+这个插件把 Loop 团队工作区接入 DeepSeek Harness（DSH），让你在一个对话里与同事和智能体一起推进项目。你可以让 Agent 查阅知识库、项目文件和频道讨论，使用 Loop 模型和团队 Skill 完成工作，也可以让它创建并分派任务、跟进进度，或运行工作流并查看结果。
 
 ## 安装和登录
 
