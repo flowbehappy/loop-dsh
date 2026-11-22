@@ -980,18 +980,7 @@ export class LoopCollaborationRuntime {
     })
     this.prepared.set(request.sessionId, binding)
     const accepted = this.pendingAccepted?.get(request.sessionId)
-    if (accepted !== undefined) {
-      if (accepted.message?.source?.rpcId !== request.requestId ||
-          digest(accepted.acceptedText) !== payloadDigest) {
-        this.publishIntentError(
-          request.sessionId,
-          intentRef,
-          "The accepted Session message did not match the pending submission",
-        )
-      } else {
-        await this.activateAcceptedIntent(binding, accepted, signal)
-      }
-    }
+    if (accepted) await this.tryActivate(binding, accepted, signal)
     return result
   }
 
@@ -1011,11 +1000,23 @@ export class LoopCollaborationRuntime {
     // must not create another continuation or restore one after turn/end.
     if (accepted.continuation !== undefined) return await accepted.continuation
     const key = `${request.sessionId}\0${request.requestId}`
+    const turn = this.currentUserInputs.get(request.sessionId)
+    const assertCurrent = () => {
+      if (this.acceptedByRequest.get(key) !== accepted) {
+        throw failure("loop-collaboration/binding-stale", "The Session binding changed while accepting this reply")
+      }
+      if (!turn || turn.message.id !== accepted.message.id || turn.message.source.rpcId !== request.requestId ||
+          this.currentUserInputs.get(request.sessionId) !== turn) {
+        throw failure("loop-collaboration/binding-stale", "The user turn ended or changed while accepting this reply")
+      }
+    }
     const binding = (async () => {
+      assertCurrent()
       const session = this.sessions.get(request.sessionId)
       if (session === undefined) throw failure("loop-collaboration/session-unavailable", "The owning Session is unavailable")
       const durable = await this.sessions.flush(session)
       if (!durable) throw failure("loop-collaboration/session-unavailable", "Session persistence did not participate")
+      assertCurrent()
       const result = await this.call("collaborationContinuation", {
         sessionId: request.sessionId,
         requestId: request.requestId,
@@ -1026,9 +1027,7 @@ export class LoopCollaborationRuntime {
         acceptedMessageId: String(accepted.message.id),
         acceptedSequence: Number(accepted.seq),
       }, signal)
-      if (this.acceptedByRequest.get(key) !== accepted) {
-        throw failure("loop-collaboration/binding-stale", "The Session binding changed while accepting this reply")
-      }
+      assertCurrent()
       if (["ready", "needs-explicit-target"].includes(result.state)) this.activeContinuations.set(request.sessionId, result)
       else this.activeContinuations.delete(request.sessionId)
       this.activeWorkCounts.set(request.sessionId, result.tasks?.length ?? 0)
@@ -1270,6 +1269,7 @@ export class LoopCollaborationRuntime {
       if (pending?.claimedRequestId && pending.state !== "activated") {
         this.failSubmission(session.id, pending, failure("loop-collaboration/cancelled", "The message ended before Loop activation"))
       }
+      this.pendingAccepted?.delete(session.id)
       this.activeIntentContexts.delete(session.id)
       this.currentUserInputs.delete(session.id)
       this.targetPreparations.delete(session.id)
@@ -1281,22 +1281,19 @@ export class LoopCollaborationRuntime {
       return
     }
     if (event.type === "user/message") {
-      if (event.data?.source?.kind === "user" && typeof event.data.source.rpcId === "string") {
-        this.recordAcceptedSubmission(session.id, event.data, event.seq)
-      }
-      if (event.data?.source?.kind === SOURCE_KIND) {
-        void this.acceptCommittedMessage(session, event.data, event.seq)
+      const message = event.data
+      if (message?.source?.kind === SOURCE_KIND) {
+        void this.acceptCommittedMessage(session, message, event.seq)
         return
       }
+      if (message?.source?.kind !== "user" || typeof message.source.rpcId !== "string") return
+      const accepted = this.recordAcceptedSubmission(session.id, message, event.seq)
       const binding = this.prepared.get(session.id)
       if (binding?.state === "bound") {
-        void this.tryActivate(session, binding, event.data, event.seq)
+        void this.tryActivate(binding, accepted)
       } else {
-        const accepted = acceptedSubmission(event.data, event.seq)
-        if (accepted !== undefined) {
-          this.pendingAccepted ??= new Map()
-          this.pendingAccepted.set(session.id, accepted)
-        }
+        this.pendingAccepted ??= new Map()
+        this.pendingAccepted.set(session.id, accepted)
       }
     }
   }
@@ -1393,27 +1390,21 @@ export class LoopCollaborationRuntime {
     return state
   }
 
-  async tryActivate(session, binding, message, seq) {
-    if (message?.source?.rpcId !== binding.requestId) return
-    const acceptedText = messageText(message)
-    if (digest(acceptedText) !== binding.payloadDigest) {
-      this.publishIntentError(session.id, binding.intentRef, "Accepted submission text did not match the prepared intent")
+  async tryActivate(binding, accepted, signal) {
+    if (accepted.message.source.rpcId !== binding.requestId) return
+    if (accepted.payloadDigest !== binding.payloadDigest) {
+      this.publishIntentError(binding.sessionId, binding.intentRef, "Accepted submission text did not match the prepared intent")
       return
     }
-    await this.activateAcceptedIntent(binding, {
-      message,
-      seq,
-      acceptedText,
-    })
-  }
+    binding.claimedRequestId = binding.requestId
 
-  async activateAcceptedIntent(binding, accepted, signal) {
     const key = `${binding.intentRef}\0${accepted.message.id}`
     if (this.activating?.has(key)) return
     this.activating ??= new Set()
     this.activating.add(key)
     try {
-      const durable = await this.sessions.flush(this.sessions.get(accepted.message.source?.sessionId ?? binding.sessionId) ?? this.ctx.sessions.get(binding.sessionId))
+      const session = this.sessions.get(binding.sessionId)
+      const durable = session && await this.sessions.flush(session)
       if (!durable) throw failure("loop-collaboration/session-unavailable", "Session persistence did not participate")
       signal?.throwIfAborted()
       if (this.prepared.get(binding.sessionId) !== binding) throw failure("loop-collaboration/cancelled", "The submission is no longer active")
@@ -1770,8 +1761,8 @@ export class LoopCollaborationRuntime {
         (existing.payloadDigest !== payloadDigest || existing.message.id !== message.id)) {
       throw failure("loop-collaboration/intent-digest-mismatch", "The accepted Session payload changed")
     }
+    // Retries must keep the first recorded sequence even after user/message is appended.
     const accepted = existing ?? {message, seq, acceptedText, payloadDigest}
-    if (seq > accepted.seq) accepted.seq = seq
     this.acceptedByRequest.set(key, accepted)
     if (this.acceptedByRequest.size > 256) {
       this.acceptedByRequest.delete(this.acceptedByRequest.keys().next().value)
@@ -1855,7 +1846,7 @@ export class LoopCollaborationRuntime {
     if (waits.length === 0) return
     if (bindingState === "bound") {
       for (const accepted of claimed) {
-        void this.tryActivate(agent.session, binding, accepted.message, accepted.seq)
+        void this.tryActivate(binding, accepted, signal)
       }
     }
     try {
@@ -1919,8 +1910,7 @@ export class LoopCollaborationRuntime {
       await this.bindIntent({sessionId, intentRef: exact.intentRef, requestId,
         payloadDigest: exact.payloadDigest, acceptedSerializedText: accepted.acceptedText,
         bindingRevision: prepared.bindingRevision}, signal)
-      current = this.prepared.get(sessionId)
-      if (current?.state !== "activated") {
+      if (this.prepared.get(sessionId) !== current || current?.state !== "activated") {
         throw failure("loop-collaboration/intent-not-accepted", this.intentFailures.get(sessionId) ?? "The submission could not be activated")
       }
     } catch (error) {
@@ -2364,11 +2354,6 @@ class CollaborationEventHub {
 }
 
 
-
-function acceptedSubmission(message, seq) {
-  if (message?.source?.kind !== "user" || typeof message.source.rpcId !== "string") return undefined
-  return {message, seq, acceptedText: messageText(message)}
-}
 
 function deliverableEvent(kind) {
   return kind === "collaboration.task_message" || kind === "collaboration.message" || kind === "collaboration.task_input_failed"

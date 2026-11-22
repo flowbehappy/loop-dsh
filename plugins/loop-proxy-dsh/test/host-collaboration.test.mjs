@@ -2123,6 +2123,63 @@ test("a delayed failed operation cannot discard a newer prepared submission", as
   assert.equal(f.collaboration.prepared.get(SESSION_ID).intentRef, newer.intentRef)
 })
 
+test("late activation cannot drop a newly selected collaborator", async () => {
+  const started = Promise.withResolvers()
+  const finish = Promise.withResolvers()
+  const f = claimedIntentFixture({async collaborationActivateIntent() {
+    started.resolve()
+    return await finish.promise
+  }})
+  await f.prepare()
+  const first = f.step()
+  await started.promise
+  f.emit("session/event", f.agent.session, {type: "turn/end"})
+  const replacement = await f.prepare()
+  finish.resolve({state: "activated"})
+  await assert.rejects(first)
+  assert.equal(f.collaboration.prepared.get(SESSION_ID)?.intentRef, replacement.intentRef)
+})
+
+test("continuation retry keeps the same evidence after user/message is appended", async () => {
+  const sequences = []
+  const f = runtimeFixture({async collaborationContinuation(request) {
+    sequences.push(request.acceptedSequence)
+    if (sequences.length === 1) throw new Error("Lost reply")
+    return {state: "ready", tasks: []}
+  }})
+  const message = {id: "message", source: {kind: "user", rpcId: "request"}, content: [{type: "text", text: "Follow up"}]}
+  await f.emit("agent/pre-step", {agent: f.agent, messages: [message]}, () => ({kind: "enter", messages: [message]}))
+  const bind = () => f.collaboration.ensureCurrentContinuation(SESSION_ID)
+  await assert.rejects(bind(), /Lost reply/)
+  f.emit("session/event", f.agent.session, {type: "user/message", seq: 3, data: message})
+  await bind()
+  assert.deepEqual(sequences, [2, 2])
+})
+
+test("a delayed client continuation cannot re-enable an ended turn", async () => {
+  const started = Promise.withResolvers()
+  const finish = Promise.withResolvers()
+  let calls = 0
+  const f = runtimeFixture({async collaborationContinuation() {
+    calls++
+    started.resolve()
+    return await finish.promise
+  }})
+  const message = {id: "message", source: {kind: "user", rpcId: "request"}, content: [{type: "text", text: "Follow up"}]}
+  await f.emit("agent/pre-step", {agent: f.agent, messages: [message]}, () => ({kind: "enter", messages: [message]}))
+  f.emit("session/event", f.agent.session, {type: "user/message", seq: 3, data: message})
+  const bind = () => f.collaboration.bindContinuation({sessionId: SESSION_ID, requestId: "request",
+    acceptedSerializedText: "Follow up", payloadDigest: "sha256:" + createHash("sha256").update("Follow up").digest("hex"), continuationRef: "continue"})
+  const first = bind()
+  await started.promise
+  f.emit("session/event", f.agent.session, {type: "turn/end"})
+  finish.resolve({state: "ready", tasks: [{taskId: "old"}]})
+  await assert.rejects(first, /turn ended/)
+  await assert.rejects(bind(), /turn ended/)
+  assert.equal(calls, 1)
+  assert.equal(f.collaboration.activeContinuations.has(SESSION_ID), false)
+})
+
 test("Host-owned activation can finish after the former two-second Client deadline", async () => {
   const f = claimedIntentFixture({async collaborationActivateIntent() {
     await new Promise(resolve => setTimeout(resolve, 2100))
