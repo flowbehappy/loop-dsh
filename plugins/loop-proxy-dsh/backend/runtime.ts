@@ -165,8 +165,8 @@ export class LoopBackend {
       return result
     })
   }
-  catalog(context: ActionContext, signal?: AbortSignal) {
-    return this.action(context, signal, (client, combined) => client.actions(combined))
+  catalog(context: ActionContext, signal?: AbortSignal, domain = "", personal = false) {
+    return this.action(context, signal, (client, combined) => client.actions(combined, domain, personal))
   }
   delegationPreview(context: ActionContext, name: string, args: Record<string,unknown> | undefined, signal?: AbortSignal) {
     return this.action(context, signal, (client, combined) => client.delegationPreview(name, args, combined))

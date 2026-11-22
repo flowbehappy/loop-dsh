@@ -48,10 +48,12 @@ export class HostAPI {
       }
       if (!response.ok) {
         await response.body?.cancel()
-        const code = ({401:"needs-auth",403:"waiting-for-access",404:"target-unavailable",409:"conflict",429:"rate-limited"} as Record<number,string>)[response.status] ?? "backend-unavailable"
+        const code = ({400:"invalid-request",422:"invalid-request",401:"needs-auth",403:"waiting-for-access",404:"target-unavailable",409:"conflict",429:"rate-limited"} as Record<number,string>)[response.status] ?? "backend-unavailable"
         // Some tool surfaces retain only the message. Use the bounded local
         // classification, never a server body, credential, URL or target ID.
-        throw new LoopError("loop-host/" + code, `Loop Host request was rejected (HTTP ${response.status}; ${code})`, response.status)
+        const hint = code === "invalid-request" && path === "/collaboration/actions/dispatch"
+          ? ". Verify the requested board and assignee membership. Keep the assignee and destination when correcting this request." : ""
+        throw new LoopError("loop-host/" + code, `Loop Host request was rejected (HTTP ${response.status}; ${code})`+hint, response.status)
       }
       if (response.status === 204) { await response.body?.cancel(); return undefined }
       try { return await boundedJSON(response,area === "sync" ? 4 << 20 : 2 << 20,options.lossless ? parseWire : JSON.parse) }

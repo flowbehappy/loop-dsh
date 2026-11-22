@@ -64,12 +64,20 @@ export function HumanTaskPanel({matched,remote,t}:PropsLocale<typeof NS> & {
 }) {
   const {sessionId,frame}=matched
   const [failure,setFailure]=useState('')
-  const decide = async (decision:'reuse'|'cancel') => {
+  const [resourceUrl,setResourceUrl]=useState('')
+  const decide = async (decision:'reuse'|'cancel'|'select') => {
     try {
-      const result = await remote.decideHumanTask?.({sessionId,requestId:frame.requestId,decision})
+      const result = await remote.decideHumanTask?.({sessionId,requestId:frame.requestId,...(decision==="select"?{decision,resourceUrl}:{decision})})
       if (!result?.ok) setFailure(frame.requestId)
     } catch { setFailure(frame.requestId) }
   }
+  if (frame.state === 'pick') return <section className={css.taskConsent}>
+    <Button onClick={()=>openExternal(frame.browseUrl,{protocol:window.location.protocol,open:window.open.bind(window)})}>{t(frame.family==='project'?'human.pickProject':'human.pickKB')}</Button>
+    <label>{t('human.pasteLink')}<input type="url" value={resourceUrl} onChange={event=>setResourceUrl(event.target.value)}/></label>
+    <Button variant="primary" disabled={!resourceUrl.trim()} onClick={()=>void decide('select')}>{t('human.shareLink')}</Button>
+    <Button onClick={()=>void decide('cancel')}>{t('human.cancel')}</Button>
+    {failure===frame.requestId && <p role="alert">{t('human.invalidLink')}</p>}
+  </section>
   return <section className={css.taskConsent} aria-label={t('human.title')}>
     {frame.agentDenied && <p>{t('human.agentDenied')}</p>}
     <strong>{frame.summary}</strong>

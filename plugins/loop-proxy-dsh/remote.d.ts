@@ -799,8 +799,8 @@ export type SetDefaultModelValue = {
 }
 
 export type HumanTaskSession = {readonly sessionId:string}
-export type HumanTaskDecision = HumanTaskSession & {readonly requestId:string; readonly decision:"cancel"|"reuse"}
-export type HumanTaskFrame = {readonly state:"idle"} | ({
+export type HumanTaskDecision = HumanTaskSession & {readonly requestId:string; readonly decision:"cancel"|"reuse"} | (HumanTaskSession & {readonly requestId:string;readonly decision:"select";readonly resourceUrl:string})
+export type HumanTaskFrame = {readonly state:"idle"} | {readonly state:"pick";readonly requestId:string;readonly browseUrl:string;readonly family:"project"|"kb"} | ({
   readonly requestId:string; readonly summary:string; readonly agentDenied?:boolean; readonly action:string; readonly resources:readonly string[]; readonly manage:boolean
 } & ({readonly state:"browser"; readonly loginUrl:string} | {readonly state:"reuse"; readonly expiresAt:string}))
 export interface HumanConnectionRequest { readonly connection: "business" | "apps" }

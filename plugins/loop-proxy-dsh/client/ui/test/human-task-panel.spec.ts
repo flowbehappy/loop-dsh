@@ -21,3 +21,19 @@ it('shows the grant target and expiry and sends the decision for this particular
   fireEvent.click(screen.getByRole('button',{name:en['human.reuse']}))
   expect(decideHumanTask).toHaveBeenCalledWith({sessionId:'session-a',requestId:'r1',decision:'reuse'})
 })
+
+it('shares only the link explicitly entered for the pending resource selection', () => {
+  const decideHumanTask=vi.fn(async()=>({ok:true,value:{}}))
+  const props={
+    matched:{kind:'loop-personal-task',sessionId:'session-a',key:'pick1',frame:{state:'pick',
+      requestId:'pick1',family:'kb',browseUrl:'https://loop.example/w/ws_one/kb'}},
+    remote:{decideHumanTask},t:(key:keyof typeof en)=>en[key],
+  }
+  render(createElement(HumanTaskPanel,props as never))
+  const confirm=screen.getByRole('button',{name:en['human.shareLink']}) as HTMLButtonElement
+  expect(confirm.disabled).toBe(true)
+  const url='https://loop.example/w/ws_one/kb/kb_one'
+  fireEvent.change(screen.getByRole('textbox',{name:en['human.pasteLink']}),{target:{value:url}})
+  fireEvent.click(confirm)
+  expect(decideHumanTask).toHaveBeenCalledWith({sessionId:'session-a',requestId:'pick1',decision:'select',resourceUrl:url})
+})

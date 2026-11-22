@@ -1455,6 +1455,15 @@ export class LoopCollaborationRuntime {
     return session && this.ctx.sessionProjections.stateOf(session, "loopCollaborationReceipts")?.feedback === true
   }
 
+  checkDispatchRetry(sessionId, command) {
+    const attempted = this.currentUserInputs.get(sessionId)?.dispatchTitles
+    if (!attempted?.size) return
+    const {tasks} = JSON.parse(command.input)
+    if (Array.isArray(tasks) && tasks.some(task => typeof task?.title === "string" && attempted.has(task.title.trim()))) {
+      throw failure("loop-collaboration/conflict", "This task already has a collaboration dispatch in this turn. Inspect its receipt or retry the original dispatch with the requested assignee. A different destination needs a new user instruction.")
+    }
+  }
+
   async authorizeAgentCall(sessionId, command, schema, signal) {
     if (this.currentUserInputs.has(sessionId) || schema?.readOnly === true) return
     const args = JSON.parse(command.input)
@@ -2115,7 +2124,7 @@ export class LoopCollaborationRuntime {
 
     register({
       name: "collaboration_dispatch",
-      description: "When the user explicitly asks, create and track exactly one Loop Task for the selected colleague or Agent, with results returned to this Session. Supply tasks: [{title, description, assignee}], using the exact directory memberId. Host supplies the bound channel; change it through explicit binding first. Verify channel membership and complete any authorized Agent invitation first. A mention alone does not authorize a Task. An unknown dispatch outcome must be recovered through the original operation; never switch to task.create.",
+      description: "When the user explicitly asks, create and track exactly one Loop Task for the selected colleague or Agent, with results returned to this Session. Supply tasks: [{title, description, assignee}], using the exact directory memberId. This dispatch uses the session’s bound channel. For a task owned directly by a named project, resolve project.list by name and call task.create with projectId and assignee together. Preserve the requested target and assignee on failure. Verify channel membership and complete any authorized Agent invitation first. A mention alone does not authorize a Task. An unknown dispatch outcome must be recovered through the original operation; never switch to task.create.",
       parameters: dispatchToolParameters(),
       async execute(args, exec) {
         const task = validateDispatchTasks(args)
@@ -2126,6 +2135,8 @@ export class LoopCollaborationRuntime {
           throw failure("loop-collaboration/invalid-request", "assignee must identify one exact directory member; no Task was created")
         }
         const target = entries[0]
+        const turn = runtime.currentUserInputs.get(sessionId(exec))
+        if (turn) (turn.dispatchTitles ??= new Set()).add(task.title.trim())
         return await runtime.runAction("dispatch", sessionId(exec), {
           actionKey: actionDigest(canonicalJSON(args)),
           target: {targetId: target.targetId, kind: target.targetType},

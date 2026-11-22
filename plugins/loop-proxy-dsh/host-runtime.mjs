@@ -1727,12 +1727,13 @@ export class LoopHostRuntime {
         sessionId,
         accountPrincipal: this.accountPrincipal,
         name: "",
-        prefix: command.name,
+        prefix: command.name, ...preparation,
       }, signal)
       if (result?.error) return {failed: true, output: boundedJSON(result)}
       if (!Array.isArray(result?.actions) || result.actions.some(name => typeof name !== "string")) {
         throw failure("loop-host/backend-invalid", "Loop Agent action catalog is invalid")
       }
+      if (result.authorizationAvailable?.length) return {failed:false,output:boundedJSON({actions:result.actions,requiresHumanAuthorization:result.authorizationAvailable})}
       if (result.actions.length === 0) {
         if (/^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$/u.test(command.name ?? "")) {
           const descriptor = await this.actions.agentSchema({
@@ -1784,6 +1785,16 @@ export class LoopHostRuntime {
       if (result?.delegation) return permissionResult(result)
       if (result === null || typeof result !== "object" || (!Object.hasOwn(result, "data") && !result.error)) {
         throw failure("loop-host/backend-invalid", "Loop Agent action result is invalid")
+      }
+      const args = JSON.parse(command.input)
+      const data = result.data?.data
+      const family = command.name === "project.list" ? "project" : command.name === "kb.list" ? "kb" : undefined
+      const rows = family === "project" ? data?.projects : data?.knowledgeBases
+      if (family && prepareDelegation && typeof args.name === "string" && args.name.trim() &&
+          Array.isArray(rows) && rows.length === 0 && !data?.hasMore && !args.cursor) {
+        return {failed:false,output:boundedJSON({...result,scope:"current_agent",next:{
+          command:"loop-proxy pick "+family, description:"For a user-requested target, ask the user to choose one resource from their own Loop workspace. Only the chosen reference enters this conversation."
+        }})}
       }
       const webUrl = !result.error && resultWebUrl(command.name, result.data?.data, this.serviceBaseUrl, loopWorkspaceId)
       return {

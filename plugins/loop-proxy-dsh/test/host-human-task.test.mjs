@@ -80,3 +80,33 @@ test("a current user task can review a real denial once without an identity keyw
   message=input("查看春季项目")
   await assert.rejects(tasks.offer("chat",message,{...owner,accountPrincipal:"another"},preview,"查看春季项目",abort.signal),/connection changed/)
 })
+
+test("project and KB selection return only the chosen locator to the original request",async t=>{
+  const owner={serviceBaseUrl:"https://loop.example",accountPrincipal:"user",loopWorkspaceId:"ws_one"}
+  let message=input("选择我要用的项目")
+  const tasks=new HumanTaskConsent({owner:async()=>owner,current:()=>message,request:()=>assert.fail("selection cannot grant access")})
+  const abort=new AbortController()
+  t.after(()=>{abort.abort();tasks.dispose()})
+  const events=tasks.events("chat",abort.signal)
+  await events.next()
+  for (const [family,id] of [["project","proj_one"],["kb","kb_one"]]) {
+    assert.equal(parseCommand("loop-proxy pick "+family).name,family)
+    const running=tasks.pick("chat",message,family,abort.signal)
+    const view=(await events.next()).value
+    assert.equal(view.state,"pick")
+    const select=resourceUrl=>tasks.decide({sessionId:"chat",requestId:view.requestId,decision:"select",resourceUrl})
+    assert.throws(()=>select(view.browseUrl.replace("ws_one","ws_other")+"/"+id))
+    assert.throws(()=>select(view.browseUrl.replace("loop.example","other.example")+"/"+id))
+    assert.throws(()=>select(view.browseUrl+"/unknown"))
+    select(view.browseUrl+"/"+id)
+    assert.deepEqual(await running,{workspaceId:"ws_one",[family==="project"?"projectId":"kbId"]:id})
+    assert.throws(()=>select(view.browseUrl+"/"+id))
+    await events.next()
+  }
+  const cancelled=tasks.pick("chat",message,"project",abort.signal)
+  const view=(await events.next()).value
+  tasks.decide({sessionId:"chat",requestId:view.requestId,decision:"cancel"})
+  await assert.rejects(cancelled,/declined/)
+  await assert.rejects(tasks.pick("chat",message,"project",abort.signal),/already declined/)
+  assert.throws(()=>tasks.forCommand("chat",command))
+})

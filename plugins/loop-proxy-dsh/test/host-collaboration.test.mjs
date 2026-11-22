@@ -229,6 +229,18 @@ test("natural-language selection reuses durable user intent and the saved channe
   await assert.rejects(f.tool("collaboration_prepare").execute(args, f.exec), /current accepted user/u)
 })
 
+test("a rejected dispatch cannot become an unassigned task through the generic action", async () => {
+  const f = naturalSelectionFixture({async collaborationAction() { throw new Error("assignee cannot see task") }})
+  await f.claim()
+  await f.tool("collaboration_prepare").execute({targetIds:["mem_a"]}, f.exec)
+  await assert.rejects(f.tool("collaboration_dispatch").execute({tasks:[{title:"Review",assignee:"mem_a"}]}, f.exec))
+  const command = title => ({verb:"call",name:"task.create",input:JSON.stringify({tasks:[{title}]})})
+  assert.throws(()=>f.collaboration.checkDispatchRetry(SESSION_ID,command("Review")),/original dispatch/)
+  f.collaboration.checkDispatchRetry(SESSION_ID,command("Separate task"))
+  f.emit("session/event", f.agent.session, {type:"turn/end"})
+  f.collaboration.checkDispatchRetry(SESSION_ID,command("Review"))
+})
+
 test("a cached preparation revalidates the route without replaying an intent", async () => {
   const f = naturalSelectionFixture()
   await f.claim()

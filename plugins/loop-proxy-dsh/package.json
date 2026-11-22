@@ -114,6 +114,7 @@
     }
   },
   "scripts": {
+    "pretest": "npm run build:backend",
     "test": "node --test --test-concurrency=1 test/*.test.mjs && npm run test:client && npm run test:client:ui",
     "test:client": "node --experimental-strip-types --test --test-concurrency=1 client/ui/test/*.test.ts",
     "test:client:ui": "vitest run --config client/vitest.config.mjs",
