@@ -129,13 +129,15 @@ test("an unpublished action cannot open a personal consent card",async t=>{
 
 test("manual authorization derives omitted write scope from the published action",async t=>{
   const signal=new AbortController().signal
-  const message=input("请代表我本人给同事发私聊")
+  const message=input("请代表我本人给同事发私聊，限定 dm:@abcdefghijkl")
   const owner={serviceBaseUrl:"https://loop.example",accountPrincipal:"user",loopWorkspaceId:"workspace"}
   const tasks=new HumanTaskConsent({current:()=>message,owner:async(_id,_s,action)=>action?{...owner,readOnly:false}:owner,
     request:async()=>assert.fail("unexpected connection request")})
   t.after(()=>tasks.dispose())
   tasks.confirm=async(_session,_message,{policy})=>({policy})
   const send={...command,name:"message.send",input:JSON.stringify({summary:"Send the approved DM",resourceConstraints:["dm:@abcdefghijkl"]})}
+  const wrongPeer={...send,input:send.input.replace("dm:@abcdefghijkl","dm:abcdefghijkl")}
+  await assert.rejects(tasks.authorize("chat",wrongPeer,signal),/exact DM resource/)
   await tasks.authorize("chat",send,signal)
   assert.equal(tasks.approved.get(message).policy.write,true)
   const readOnly={...send,input:JSON.stringify({...JSON.parse(send.input),write:false})}

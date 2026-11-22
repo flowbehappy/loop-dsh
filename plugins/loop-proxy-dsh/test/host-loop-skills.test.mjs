@@ -682,6 +682,7 @@ test("Loop Wiki 你看看里边有什么东西。 forwards browsing and preserve
   const service = {
     skills,
     agentCommand: LoopHostService.prototype.agentCommand,
+    checkAssignee: LoopHostService.prototype.checkAssignee,
     checkChannelRead: LoopHostService.prototype.checkChannelRead,
     channelReads: new WeakSet(),
     canUseAgentActions: () => true,

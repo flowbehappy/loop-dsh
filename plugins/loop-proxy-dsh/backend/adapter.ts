@@ -386,6 +386,12 @@ export class NativeHostActions {
             : await this.backend.invoke(context,input.name,input.arguments??{},combined)
         } catch (error) {
           if (!input.prepareDelegation || !(error instanceof LoopError) || error.outcomeUnknown) throw error
+          // A peer DM belongs to the sending identity. An empty Agent inbox says
+          // nothing about the user's conversation with the same colleague.
+          if (action === "agentAction" && input.name === "message.history" && /^dm:@[a-z0-9]{12}$/u.test(input.arguments?.target) &&
+              /dm does not exist/iu.test(error.message)) {
+            return this.backend.humanDM(context,input.name,{...input.arguments,asHuman:true},combined)
+          }
           const denied = permissionDenied(error)
           const missing = error.status===404 && error.code==="unknown_action"
           if (!denied && !missing) throw error

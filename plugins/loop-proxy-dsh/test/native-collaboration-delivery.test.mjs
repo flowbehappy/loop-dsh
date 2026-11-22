@@ -49,3 +49,29 @@ test('general channel send also enforces link-only sharing for a generated excer
   send('Approved wording '+link,'Send this exact message: Approved wording '+link)
   send('Discuss the budget','Tell the team to discuss the budget.')
 })
+
+test('ambiguous assignees are checked against the live human directory before a task write', async () => {
+  const {default:Host} = await import('../host-service.mjs')
+  const first = {name:'aaaaaaaaaaaa',displayName:'Alex'}, second = {name:'bbbbbbbbbbbb',displayName:'Alex'}
+  let text = 'Assign the task to Alex'
+  const message = {source:{kind:'user',rpcId:'rpc'},get content() {return [{type:'text',text}]}}
+  let reads = 0
+  const host = {findHumans:Host.prototype.findHumans,humanTasks:{current:()=>message},runtime:{async agentCommand(_id,command) {
+    reads++
+    const {query} = JSON.parse(command.input)
+    const humans = query === 'Alex' ? [first,second] : query === 'alice2' ? [second] : [first,second].filter(person=>person.name === query)
+    return {output:JSON.stringify({data:{data:{humans}}})}
+  }}}
+  const check = (action,args)=>Host.prototype.checkAssignee.call(host,'chat',message,{verb:'call',name:action,input:JSON.stringify(args)})
+  await assert.rejects(check('task.assign',{assignee:first.name}),/Several people/)
+  await assert.rejects(check('task.create',{tasks:[{assignee:'Alex'}]}),/Several people/)
+  host.assigneeAnswers = new WeakMap([[message,{answers:['登录名 alice2']}]])
+  await check('task.assign',{assignee:second.name})
+  await assert.rejects(check('task.assign',{assignee:first.name}),/Several people/)
+  await assert.rejects(check('task.assign',{assignee:'Alex'}),/Several people/)
+  const prior = reads
+  await check('task.update',{title:'Keep the owner'})
+  text = 'Assign it to @'+second.name
+  await check('task.assign',{assignee:second.name})
+  assert.equal(reads,prior)
+})

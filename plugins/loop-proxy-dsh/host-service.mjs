@@ -77,14 +77,39 @@ export default class LoopHostService extends TypertRemoteService {
       request: (...args) => this.runtime.humanConnectionRequest(...args),
     })
     this.channelReads = new WeakSet()
+    this.assigneeAnswers = new WeakMap()
+    ctx.on("session/event",(session,event)=>{
+      const message = this.humanTasks.current(session.id)
+      if (!message) return
+      const data = event.data
+      let state = this.assigneeAnswers.get(message)
+      if (event.type === "tool/call" && data.name === "ask_user_question") {
+        if (!state) this.assigneeAnswers.set(message,state = {calls:new Set(),answers:[]})
+        state.calls.add(data.callId)
+      }
+      const direct = event.type === "tool/result" && state?.calls.delete(data.message?.toolCallId)
+      const nested = event.type === "tool/ptc-dispatch" && data.name === "ask_user_question"
+      if ((!direct && !nested) || (direct ? data.message.isError : data.isError)) return
+      if (!state) this.assigneeAnswers.set(message,state = {calls:new Set(),answers:[]})
+      for (const block of (direct ? data.message.content : data.content) ?? []) {
+        if (block.type !== "text") continue
+        let answer
+        try { answer = JSON.parse(block.text) } catch { continue }
+        for (const item of answer.answers ?? []) {
+          for (const value of [...(item.selected ?? []),item.custom]) if (typeof value === "string") state.answers.push(value)
+        }
+      }
+    })
     const registerActionTool = (name,description,parameters,toCommand) => {
       ctx.tools.register(defineTool({
         name,description,parameters,
         output:{schema:{type:"string"},render:(_args,value)=>[{type:"text",text:value}]},
         execute:async (args,exec) => {
           const sessionId = exec.agent?.session?.id
-          if (!sessionId || !this.humanTasks.current(sessionId)) throw new Error("A current user request is required.")
-          const [action,input] = toCommand(args)
+          const message = sessionId && this.humanTasks.current(sessionId)
+          if (!message) throw new Error("A current user request is required.")
+          const [action,input] = await toCommand(args,sessionId,exec.signal)
+          if (this.humanTasks.current(sessionId) !== message) throw new Error("The originating user request changed.")
           const result = await this.agentCommand(sessionId,{verb:"call",name:action,input:JSON.stringify(input)},exec.signal)
           if (result.failed) throw new Error(result.output)
           return result.output
@@ -102,6 +127,21 @@ export default class LoopHostService extends TypertRemoteService {
     registerActionTool("loop_channel_history","Read or summarize messages in a named Loop channel. For an ordinary summary, report only the speakers and messages visible to this assistant. Other speakers may be hidden. For verification from the user's perspective choose readAs=human to request single-channel read-only access.",{
       channelName,readAs:{type:"string",enum:["agent","human"]},limit:{type:"integer",description:"Number of recent messages (1–100)."},
     },args=>["message.history",args])
+    registerActionTool("loop_assign_task","Assign an existing Loop Task to a colleague by the exact login, member ID or display name given by the user. If several people share a name ask for the login or member ID before making a change.",{
+      taskId:{type:"string",required:true},recipient:{type:"string",required:true,description:"Literal login, member ID or display name from the user or their clarification."},
+    },async ({taskId,recipient},sessionId,signal)=>{
+      if (!/^tsk_[a-z0-9_]+$/u.test(taskId) || !recipient?.trim()) throw new Error("Supply the exact Task ID and recipient.")
+      const page = await this.findHumans(sessionId,recipient.trim().replace(/^@/u,""),signal)
+      const matches = page.humans ?? []
+      if (page.hasMore || matches.length !== 1) throw new Error("No single colleague matches this name. Ask the user for the exact login or member ID. No task was changed.")
+      return ["task.assign",{task:taskId,assignee:matches[0].name}]
+    })
+    registerActionTool("loop_task_comment","Post a message in an existing Loop Task's discussion (任务讨论、留言). Use the Task ID from task.get or task.list. A checkpoint records progress separately.",{
+      taskId:{type:"string",required:true},content:{type:"string",required:true},clientMessageId:{type:"string",required:true,description:"Stable retry key for this comment."},
+    },({taskId,content,clientMessageId})=>{
+      if (!/^tsk_[a-z0-9_]+$/u.test(taskId) || !content?.trim() || !clientMessageId?.trim()) throw new Error("Supply the exact Task ID, comment and retry key.")
+      return ["message.send",{target:"#"+taskId,content,clientMessageId}]
+    })
     registerActionTool("loop_direct_message","Read or send a private Loop message in the user's conversation with a colleague. Resolve the exact Human member with workspace.list first. Uses the user's own identity with scoped confirmation.",{
       memberId:{type:"string",required:true,description:"Exact Loop Human member ID."},
       operation:{type:"string",required:true,enum:["read","send"]},
@@ -435,12 +475,13 @@ export default class LoopHostService extends TypertRemoteService {
     return this.runtime.canUseAgentActions()
   }
 
-  humanCommand(sessionId, command, signal) {
+  async humanCommand(sessionId, command, signal) {
     if (command.name === "task.create" && command.verb === "call") this.collaboration.checkDispatchRetry(sessionId,command)
     if (command.verb === "authorize") return this.humanTasks.authorize(sessionId, command, signal)
     checkDocumentShare(command,this.humanTasks.current(sessionId),this.runtime.serviceBaseUrl)
     this.checkChannelRead(this.humanTasks.current(sessionId),command)
     const task = this.humanTasks.forCommand(sessionId, command)
+    await this.checkAssignee(sessionId,task.message,command,signal)
     return this.runtime.humanCommand(sessionId, command, signal, () => this.humanTasks.current(sessionId) === task.message, task.grant)
   }
 
@@ -469,6 +510,7 @@ export default class LoopHostService extends TypertRemoteService {
       }
     }
     this.checkChannelRead(message,command)
+    await this.checkAssignee(sessionId,message,command,signal)
     const args = command.verb === "call" && command.name === "message.history" ? JSON.parse(command.input) : {}
     const named = message && (typeof args.channelName === "string" || /^#[a-z0-9][a-z0-9-]*$/u.test(args.target))
     // A display-name lookup can suspend at consent. Keep concurrent fallback
@@ -511,6 +553,45 @@ export default class LoopHostService extends TypertRemoteService {
       if (named) this.channelReads.add(message)
       throw error
     }
+  }
+
+  async findHumans(sessionId,query,signal) {
+    const response = await this.runtime.agentCommand(sessionId,{verb:"call",name:"workspace.list",
+      input:JSON.stringify({kind:"humans",query,limit:100})},signal)
+    if (response.failed) throw new Error("Cannot verify the named assignee. Ask the user for the exact member ID before assigning.")
+    return JSON.parse(response.output).data.data
+  }
+
+  async checkAssignee(sessionId,message,command,signal) {
+    if (command.verb !== "call" || !["task.assign","task.create","task.update"].includes(command.name)) return
+    const request = userText(message)
+    if (!request) return
+    const args = JSON.parse(command.input)
+    const assignees = [args.assignee, ...(Array.isArray(args.tasks) ? args.tasks.map(task=>task?.assignee) : [])]
+      .filter(id=>typeof id === "string" && id.trim()).map(id=>id.replace(/^@/u,""))
+    for (const assignee of new Set(assignees)) {
+      if (/^[a-z0-9]{12}$/u.test(assignee) && request.includes(assignee)) continue
+      const page = await this.findHumans(sessionId,assignee,signal)
+      const candidate = page.humans?.find(row=>row.name === assignee || row.displayName === assignee)
+      if (!candidate?.displayName || !request.includes(candidate.displayName)) continue
+      const names = candidate.displayName === assignee ? page : await this.findHumans(sessionId,candidate.displayName,signal)
+      const matches = (names.humans ?? []).filter(row=>row.displayName === candidate.displayName)
+      if (matches.length > 1 || names.hasMore) {
+        const replies = this.assigneeAnswers?.get(message)?.answers ?? []
+        const selected = new Set()
+        for (const reply of replies) {
+          for (const row of matches) if (reply.includes(row.name)) selected.add(row.name)
+          const login = /(?:登录名|登入名|login(?: name)?|username)\s*(?:为|是|[:：])?\s*[`“"']?([a-z0-9_.-]+)/iu.exec(reply)?.[1] ??
+            (/^[a-z0-9_.-]+$/iu.test(reply.trim()) ? reply.trim() : undefined)
+          if (!login) continue
+          const choice = await this.findHumans(sessionId,login,signal)
+          if (!choice.hasMore && choice.humans?.length === 1 && matches.some(row=>row.name === choice.humans[0].name)) selected.add(choice.humans[0].name)
+        }
+        if (selected.size === 1 && selected.has(assignee)) continue
+        throw new Error("Several people can match "+candidate.displayName+". No task was changed. Ask the user to reply in the conversation with the intended login or member ID, or use a member ID explicitly selected by the user. Do not choose by roster order. Candidates: "+matches.map(row=>row.name).join(", "))
+      }
+    }
+    if (this.humanTasks.current(sessionId) !== message) throw new Error("The originating user request changed.")
   }
 
   checkChannelRead(message,command) {

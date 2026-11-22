@@ -166,6 +166,11 @@ export class HumanTaskConsent {
     }
     const owner = await this.owner(sessionId,signal,command.name)
     const policy = taskPolicy(command,owner.readOnly)
+    const requestedPeer = userText(message).match(/dm:@[a-z0-9]{12}(?![a-z0-9])/gu)
+    if (requestedPeer?.length === 1 && ["message.send","message.history"].includes(command.name) &&
+        !policy.policy.resourceConstraints.includes(requestedPeer[0])) {
+      throw refusal("Use the exact DM resource specified by the user: "+requestedPeer[0]+". No authorization has been requested.")
+    }
     const grant = await this.confirm(sessionId,message,policy,signal,owner)
     this.approved.set(message,grant)
     return {failed:false,output:JSON.stringify({authorized:true,connection:grant.policy.connection,action:command.name,resources:grant.policy.resourceConstraints})}

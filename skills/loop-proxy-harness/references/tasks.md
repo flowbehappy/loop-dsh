@@ -26,6 +26,13 @@ Use the current Task `revision` for edits that require it. A message's
 `messageSeq` is not a Task revision. Describe `task.update` before editing and
 send only the intended fields. Report returned state, not assumed progress.
 
+For a request to leave a comment in a task discussion (任务讨论里留言), use
+`loop_task_comment` with the verified task ID and a stable retry key. The
+receipt and the task discussion identify where the message was posted.
+For an existing task use `loop_assign_task` with the literal login, member ID or display name supplied by the user.
+If two people share the name, ask for an exact login or member ID. Channel
+history and list order do not identify which colleague the user meant.
+
 ## Create for a colleague in a named channel
 
 When the user names a destination channel, use `loop_channel_task` with the literal
