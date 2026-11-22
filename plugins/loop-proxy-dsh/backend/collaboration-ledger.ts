@@ -63,7 +63,7 @@ export class CollaborationLedger {
       const state=await this.store.load(route),record=state.actions[id]
       if(!record)throw new LoopError("loop-host/not-bound","Original collaboration request is unavailable")
       if(record.receipt)return {...record.receipt,replayed:true}
-      if(!recoverable(record))throw new LoopError("loop-host/conflict","Collaboration action has a terminal outcome")
+      if(!recoverable(record))throw new LoopError("loop-host/conflict",record.phase==="failed" && Number.isInteger(record.httpStatus) ? `Loop rejected the original ${record.kind} (HTTP ${record.httpStatus}). Inspect the original target and inputs before retrying.` : "Collaboration action has a terminal outcome")
       if(record.kind==="set-subscription" && !record.request.expectedScopeId)throw new LoopError("loop-host/conflict","Legacy subscription request has no stable scope proof")
       await this.store.update(route,current=>{current.actions[id].phase="dispatching";current.actions[id].updatedAt=new Date().toISOString()},signal)
       let result:any,failure:unknown
@@ -77,6 +77,7 @@ export class CollaborationLedger {
         item.updatedAt=new Date().toISOString()
         if(failure){
           const known=failure instanceof LoopError && !failure.outcomeUnknown && failure.status>=400 && failure.status<500 && ![408,429].includes(failure.status)
+          if(known && failure instanceof LoopError)item.httpStatus=failure.status
           item.phase=known?"failed":"unknown";item.reason=known?"Loop rejected the collaboration request":"The original request requires reconciliation"
         }else{
           item.phase="completed";item.reason="";item.receipt=result

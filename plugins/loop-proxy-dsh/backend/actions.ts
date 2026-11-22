@@ -10,14 +10,23 @@ function actionPath(id: string): string {
 export class ActionClient {
   private http: LoopHTTP
   constructor(http: LoopHTTP) { this.http = http }
-  async actions(signal?: AbortSignal): Promise<Action[]> {
+  async actions(signal?: AbortSignal, domain = "", personal = false): Promise<Action[]> {
     const actions: Action[] = []
     const seen = new Set<string>()
     let cursor = ""
     for (let page = 0; page < 200; page++) {
       const query = new URLSearchParams({limit: "50", available: "true"})
+      if (domain) query.set("domain", domain)
       if (cursor) query.set("cursor", cursor)
-      const result = await this.http.request("GET", "/actions?" + query, undefined, signal)
+      let result
+      try {
+        const path = personal ? "/actions/delegation-catalog" : "/actions"
+        result = await this.http.request("GET", path + "?" + query, undefined, signal)
+      } catch (error) {
+        // Earlier Loop servers expose only exact-action delegation previews.
+        if (personal && error instanceof LoopError && error.status === 404) return []
+        throw error
+      }
       if (!Array.isArray(result?.actions) || result.actions.some((a: any) => typeof a?.id !== "string" || !a.id)) {
         throw new LoopError("loop-host/backend-invalid", "Invalid Loop action catalog")
       }

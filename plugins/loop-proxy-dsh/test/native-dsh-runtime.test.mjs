@@ -57,6 +57,7 @@ import {randomUUID} from 'node:crypto'
 import {createServer} from 'node:http'
 import {once} from 'node:events'
 import {setTimeout as delay} from 'node:timers/promises'
+import {prepareBusinessJourney} from ${JSON.stringify(new URL('./native-dsh-business-fixture.mjs',import.meta.url).href)}
 export const name='native-runtime-test'
 export const inject=['loopHostActions','loopNativeSyncWriterFactory','sessionController','workspaceRegistry','credentials','loopHostService']
 export async function apply(ctx){
@@ -71,8 +72,8 @@ export async function apply(ctx){
   const base=${JSON.stringify(base??'')}
   if(base){
    let token=''
-   const api=async(method,path,body)=>{
-    const response=await fetch(base+path,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},...(body===undefined?{}:{body:JSON.stringify(body)}),redirect:'error',signal:AbortSignal.timeout(15000)})
+   const api=async(method,path,body,bearer=token)=>{
+    const response=await fetch(base+path,{method,headers:{Accept:'application/json','Content-Type':'application/json',...(bearer?{Authorization:'Bearer '+bearer}:{})},...(body===undefined?{}:{body:JSON.stringify(body)}),redirect:'error',signal:AbortSignal.timeout(15000)})
     assert.ok(response.ok,method+' '+path.split('?')[0]+' '+response.status)
     const text=await response.text();return text?JSON.parse(text):undefined
    }
@@ -80,7 +81,7 @@ export async function apply(ctx){
    await trace("registration");const registered=await api('POST','/api/v1/auth/register',{name:'native_'+randomUUID().slice(0,8),email:'native-'+randomUUID()+'@example.com',password})
    token=registered.accessToken
    if(!registered.user.emailVerified){const mailbox=await api('GET','/internal/e2e/mailbox/latest?kind=verify&email='+encodeURIComponent(registered.user.email));await api('POST','/api/v1/auth/verify-email',{token:mailbox.token})}
-   let upstreamCalls=0,upstreamError=''
+   let upstreamCalls=0,upstreamError='',business
    const upstream=createServer(async(req,res)=>{
     try{
      assert.equal(req.url,'/v1/chat/completions');assert.equal(req.headers.authorization,'Bearer isolated-model-key')
@@ -89,8 +90,9 @@ export async function apply(ctx){
      upstreamCalls++
      const nl=String.fromCharCode(10),event=value=>'data: '+JSON.stringify(value)+nl+nl
      res.writeHead(200,{'Content-Type':'text/event-stream'})
-     res.write(event({id:'test-completion',object:'chat.completion.chunk',created:1,model:'native-test-model',choices:[{index:0,delta:{role:'assistant',content:'NATIVE_DSH_MODEL_OK'},finish_reason:null}]}))
-     res.end(event({id:'test-completion',object:'chat.completion.chunk',created:1,model:'native-test-model',choices:[{index:0,delta:{},finish_reason:'stop'}],usage:{prompt_tokens:12,completion_tokens:6,total_tokens:18}})+'data: [DONE]'+nl+nl)
+     const call=business?.next(input)
+     res.write(event({id:'test-completion',object:'chat.completion.chunk',created:1,model:'native-test-model',choices:[{index:0,delta:call?{role:'assistant',tool_calls:[call]}:{role:'assistant',content:'NATIVE_DSH_MODEL_OK'},finish_reason:null}]}))
+     res.end(event({id:'test-completion',object:'chat.completion.chunk',created:1,model:'native-test-model',choices:[{index:0,delta:{},finish_reason:call?'tool_calls':'stop'}],usage:{prompt_tokens:12,completion_tokens:6,total_tokens:18}})+'data: [DONE]'+nl+nl)
     }catch(error){upstreamError=String(error);res.writeHead(500).end()}
    })
    await trace("upstream-start");upstream.listen(0,'127.0.0.1');await once(upstream,'listening')
@@ -152,10 +154,19 @@ export async function apply(ctx){
    const syncRequest={workspaceId:localWorkspace.id,sessionId:result.session.sessionId}
    const enabled=await hostRuntime.setSync({...syncRequest,enabled:true});assert.ok(['on','pending'].includes(enabled.sync.state))
    await trace("select-model");await ctx.sessionController.selectModel({sessionId:result.session.sessionId,provider:group.id,model:model.id})
-   await trace("prompt");await ctx.sessionController.prompt({sessionId:result.session.sessionId,requestId:randomUUID(),content:[{type:'text',text:'Reply with NATIVE_DSH_MODEL_OK.'}]},AbortSignal.timeout(20000))
+   if(method==="browser" && process.env.LOOP_TS_E2E_BUSINESS==="1"){const control=new AbortController();ctx.effect(()=>()=>control.abort());business=await prepareBusinessJourney(api,workspace,ctx.loopHostService,result.session.sessionId,control.signal)}
+   await trace("prompt");await ctx.sessionController.prompt({sessionId:result.session.sessionId,requestId:randomUUID(),content:[{type:'text',text:business?'在 DSH project journey 项目中给项目负责人派一个测试任务，并在选中的知识库创建一份文档。':'Reply with NATIVE_DSH_MODEL_OK.'}]},AbortSignal.timeout(20000))
    await trace("wait");const completed=await ctx.sessionController.wait({sessionId:result.session.sessionId,timeoutMs:20000},AbortSignal.timeout(25000))
-   assert.equal(upstreamError,'');assert.ok(upstreamCalls>0,'DSH must reach the configured upstream through Loop: '+JSON.stringify(completed))
+   await trace("check outcome");business?.check();assert.equal(upstreamError,'');assert.ok(upstreamCalls>0,'DSH must reach the configured upstream through Loop: '+JSON.stringify(completed))
    assert.ok(JSON.stringify(completed.output).includes('NATIVE_DSH_MODEL_OK'),'persisted assistant output must contain the streamed model reply')
+   if(business) {
+     await business.retry()
+     await ctx.sessionController.prompt({sessionId:result.session.sessionId,requestId:randomUUID(),content:[{type:'text',text:'现在请重新申请刚才项目的授权，派给同一人，然后创建知识库文档。建立私有协作群，邀请测试同事并 @ 提醒他。'}]},AbortSignal.timeout(20000))
+     const retried=await ctx.sessionController.wait({sessionId:result.session.sessionId,timeoutMs:20000},AbortSignal.timeout(25000))
+     assert.ok(JSON.stringify(retried.output).includes('NATIVE_DSH_MODEL_OK'))
+     await business.verify()
+     result.business=true
+   }
    await trace('sync-receipt')
    let uploaded
    const syncTarget=await hostRuntime.sessionSyncTarget(result.session.sessionId)
@@ -221,6 +232,7 @@ export async function apply(ctx){
   assert.doesNotMatch(log,/failed to import|ENOENT.*loop-proxy/u)
   assert.doesNotMatch(log,/opening the default browser/u)
   assert.ok(result.session.sessionId)
+  if(method==='browser' && process.env.LOOP_TS_E2E_BUSINESS==='1')assert.equal(result.business,true)
   if(publicOrigin)assert.deepEqual(result.worksite,{relay:true,launch:true,remoteHost:true,remoteOAuth:true})
   if(base)assert.deepEqual(result.realLoop,{method,account:true,modelCatalog:true,sessionAction:true,modelStream:true,telemetrySync:true,disconnect:true})
   const worksite=publicOrigin

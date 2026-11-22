@@ -389,6 +389,7 @@ export default class LoopHostService extends TypertRemoteService {
   }
 
   humanCommand(sessionId, command, signal) {
+    if (command.name === "task.create" && command.verb === "call") this.collaboration.checkDispatchRetry(sessionId,command)
     if (command.verb === "authorize") return this.humanTasks.authorize(sessionId, command, signal)
     const task = this.humanTasks.forCommand(sessionId, command)
     return this.runtime.humanCommand(sessionId, command, signal, () => this.humanTasks.current(sessionId) === task.message, task.grant)
@@ -403,7 +404,12 @@ export default class LoopHostService extends TypertRemoteService {
   }
 
   async agentCommand(sessionId, command, signal, description) {
+    if (command.name === "task.create" && command.verb === "call") this.collaboration.checkDispatchRetry(sessionId,command)
     const message = this.humanTasks.current(sessionId)
+    if (command.verb === "pick") {
+      const selected = await this.humanTasks.pick(sessionId,message,command.name,signal)
+      return {failed:false,output:JSON.stringify(selected)}
+    }
     const result = await this.runtime.agentCommand(sessionId, command, signal, this.humanTasks.canOffer(message))
     if (!result.delegation) return result
     const grant = await this.humanTasks.offer(sessionId, message, result.owner, result.delegation, description, signal, command.input)

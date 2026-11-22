@@ -339,8 +339,13 @@ export class NativeHostActions {
     switch(action){
       case "agentCatalog":{
         if(!input.workspaceId)throw new LoopError("loop-host/invalid-request","Host Workspace is required")
-        const catalog=await this.backend.catalog(context,combined)
-        return {actions:catalog.map(item=>item.id).filter(name=>!input.prefix || name.startsWith(input.prefix)).sort()}
+        const domain = /^[a-z][a-z0-9-]*\./u.exec(input.prefix || "")?.[0].slice(0,-1) ?? ""
+        const catalog = await this.backend.catalog(context,combined,domain)
+        const actions = catalog.map(item=>item.id).filter(name=>!input.prefix || name.startsWith(input.prefix)).sort()
+        if (!domain || input.prefix !== domain+"." || !input.prepareDelegation) return {actions}
+        const direct = new Set(actions)
+        const personal = await this.backend.catalog(context,combined,domain,true)
+        return {actions, authorizationAvailable:personal.filter(item=>!direct.has(item.id)).map(item=>({id:item.id,summary:item.summary}))}
       }
       case "agentSchema":
       case "agentAction": {
