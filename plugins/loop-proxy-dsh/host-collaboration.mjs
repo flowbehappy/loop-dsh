@@ -288,12 +288,13 @@ export function createCollaborationReceiptProjection() {
   return {
     key: "loopCollaborationReceipts",
     stateSchema: receiptSchema,
-    // Replay old checkpoints: v1 omitted ordinary inbox positions.
-    stateVersion: 2,
+    // Replay old checkpoints to recover local input identities in the inbox.
+    stateVersion: 3,
     init() {
       return {entries: {}}
     },
     apply(state, event) {
+      if (event.type === "turn/end" && state.claimedInputs?.length) return {...state, claimedInputs: []}
       if (event.type === "user/message" && event.data?.source?.kind === SOURCE_KIND) {
         const source = event.data.source
         const entry = state.entries[source.deliveryId]
@@ -317,13 +318,18 @@ export function createCollaborationReceiptProjection() {
       const previous = state[queue] ?? []
       const inserted = (splice.inserted ?? []).map(message => {
         const source = loopDelivery(message)
+        if (message?.source?.kind === "user" && typeof message.source.rpcId === "string" && Array.isArray(message.content)) {
+          return {id: message.id, requestId: message.source.rpcId, payloadDigest: digest(messageText(message))}
+        }
         // Keep ordinary positions, not their message bodies.
         return source === undefined ? null : {id: message.id, source}
       })
       const removed = splice.removedCount ?? 0
       if (removed === 0 && inserted.length === 0) return state
       const entries = {...state.entries}
+      const claimedInputs = [...(state.claimedInputs ?? [])]
       for (const message of previous.slice(splice.start, splice.start + removed)) {
+        if (message?.requestId && splice.outcome !== "canceled") claimedInputs.push({...message, seq: event.seq})
         const source = loopDelivery(message)
         if (source === undefined) continue
         entries[source.deliveryId] = {
@@ -341,7 +347,7 @@ export function createCollaborationReceiptProjection() {
           sessionSeq: event.seq,
         }
       }
-      return {...state, entries, [queue]: previous.toSpliced(splice.start, removed, ...inserted)}
+      return {...state, entries, claimedInputs, [queue]: previous.toSpliced(splice.start, removed, ...inserted)}
     },
   }
 }
@@ -486,15 +492,16 @@ export class LoopCollaborationRuntime {
       }
       if (withheld && !admitted.some(message => message?.source?.kind === "user" || loopDelivery(message) !== undefined)) return {kind: "reject"}
       decision.messages = admitted
-      await this.awaitIntentActivation(agent, messages, signal)
+
       // Capture only inputs actually claimed by this turn. No Loop lookup or
       // continuation is prepared until a model invokes a collaboration action.
       const claimedIds = new Set((messages ?? []).filter(message => message?.source?.kind === "user").map(message => message.id))
-      for (const message of decision.messages) {
-        if (claimedIds.has(message.id) && message?.source?.kind === "user" && typeof message.source.rpcId === "string") {
-          this.currentUserInputs.set(agent.session.id, {message})
-          this.activeContinuations.delete(agent.session.id)
-        }
+      const localInputs = admitted.filter(message => claimedIds.has(message.id) &&
+        message?.source?.kind === "user" && typeof message.source.rpcId === "string")
+      await this.awaitIntentActivation(agent, localInputs, signal)
+      for (const message of localInputs) {
+        this.currentUserInputs.set(agent.session.id, {message})
+        this.activeContinuations.delete(agent.session.id)
       }
       return decision
     })
@@ -855,7 +862,7 @@ export class LoopCollaborationRuntime {
       this.observeBindingScope(sessionId, status.scope, undefined, undefined, status.deliveryScope)
       this.bound.set(sessionId, true)
       assertCurrent()
-      const accepted = this.recordAcceptedSubmission(sessionId, input.message, 0)
+      const accepted = this.acceptanceEvidence(sessionId, input.message)
       const prepared = await this.prepareIntent({sessionId,
         serializedText: accepted.acceptedText, targets,
         bindingRevision: status.scope.bindingRevision,
@@ -1738,6 +1745,22 @@ export class LoopCollaborationRuntime {
     })
   }
 
+  acceptanceEvidence(sessionId, message) {
+    const requestId = message.source.rpcId
+    const payloadDigest = digest(messageText(message))
+    const committed = this.acceptedByRequest.get(`${sessionId}\0${requestId}`)
+    if (committed?.message.id === message.id && committed.payloadDigest === payloadDigest && committed.seq > 0) return committed
+    // pre-step runs after the inbox claim, before user/message is appended.
+    const session = this.sessions.get(sessionId)
+    const state = this.ctx.sessionProjections.stateOf(session, "loopCollaborationReceipts")
+    const claim = state?.claimedInputs?.findLast(item =>
+      item.id === message.id && item.requestId === requestId && item.payloadDigest === payloadDigest)
+    if (!Number.isSafeInteger(claim?.seq) || claim.seq < 1) {
+      throw failure("loop-collaboration/intent-not-accepted", "No matching Session inbox claim for the accepted user message")
+    }
+    return this.recordAcceptedSubmission(sessionId, message, claim.seq)
+  }
+
   recordAcceptedSubmission(sessionId, message, seq) {
     const key = `${sessionId}\0${message.source.rpcId}`
     const acceptedText = messageText(message)
@@ -1761,7 +1784,7 @@ export class LoopCollaborationRuntime {
   async ensureCurrentContinuation(sessionId, signal) {
     const accepted = this.currentUserInputs.get(sessionId)
     if (!accepted) throw failure("loop-collaboration/intent-not-accepted", "A current accepted user instruction is required")
-    const recorded = this.recordAcceptedSubmission(sessionId, accepted.message, 0)
+    const recorded = this.acceptanceEvidence(sessionId, accepted.message)
     const result = await this.bindContinuation({
       sessionId,
       requestId: accepted.message.source.rpcId,
@@ -1798,7 +1821,12 @@ export class LoopCollaborationRuntime {
           "The claimed Session submission did not match the prepared intent",
         )
       }
-      claimed.push({message, seq: 0, acceptedText})
+      try {
+        claimed.push(this.acceptanceEvidence(sessionId, message))
+      } catch (error) {
+        this.failSubmission(sessionId, binding, error)
+        throw error
+      }
     }
     if (claimed.length === 0) return
     if (binding.activateOnClaim) {

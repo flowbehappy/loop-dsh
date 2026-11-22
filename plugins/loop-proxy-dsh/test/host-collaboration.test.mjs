@@ -47,6 +47,8 @@ function runtimeFixture(actions = {}, options = {}) {
   }
   const listeners = new Map()
   let projection
+  let state
+  let seq = 0
   const session = {id: SESSION_ID}
   const agent = {
     session,
@@ -74,10 +76,11 @@ function runtimeFixture(actions = {}, options = {}) {
     sessionProjections: {
       register(definition) {
         projection = definition
+        state = definition.init()
         return () => { projection = undefined }
       },
       stateOf() {
-        return options.projectionState
+        return options.projectionState ?? state
       },
     },
     systemPrompt: {
@@ -123,7 +126,16 @@ function runtimeFixture(actions = {}, options = {}) {
     agent,
     ctx,
     collaboration,
-    emit: (name, ...args) => listeners.get(name)?.(...args),
+    emit(name, ...args) {
+      if (name === "agent/pre-step" && args[0].messages?.length) {
+        const messages = args[0].messages
+        for (const data of [{inserted: messages}, {removedCount: messages.length}]) {
+          state = projection.apply(state, {type: "agent/inbox/spliced", seq: ++seq, data: {target: "next-turn", start: 0, ...data}})
+        }
+      }
+      if (name === "session/event") state = projection.apply(state, args[1])
+      return listeners.get(name)?.(...args)
+    },
     projection: () => projection,
   }
 }
@@ -1090,7 +1102,7 @@ test("first @ pre-step activates a bound claimed message before user/message is 
   assert.ok(activated)
   assert.equal(activated.acceptedEventId, "message_delayed")
   assert.equal(activated.acceptedMessageId, "message_delayed")
-  assert.equal(activated.acceptedSequence, 0)
+  assert.equal(activated.acceptedSequence, 2)
   assert.equal(activated.acceptedTextDigest, payloadDigest)
   assert.match(context, /agt_1/u)
   assert.match(context, /dispatch/u)
@@ -1179,7 +1191,7 @@ test("first @ pre-step tolerates provisional intent and activates after exact bi
   await barrier
   assert.equal(admitted, true)
   assert.equal(activated.acceptedEventId, "message_claim_first")
-  assert.equal(activated.acceptedSequence, 0)
+  assert.equal(activated.acceptedSequence, 2)
   assert.equal(activated.acceptedTextDigest, exact.payloadDigest)
 })
 
@@ -1211,17 +1223,13 @@ test("first @ pre-step fails closed instead of admitting an unactivated model tu
   })
   let nextCalled = false
   let admitted = false
-  const preStep = fixture.emit("agent/pre-step", {
-    agent: fixture.agent,
-    messages: [{
-      id: "message_timeout",
-      role: "user",
-      content: [{type: "text", text}],
-      source: {kind: "user", rpcId: "request_timeout"},
-    }],
-  }, () => {
+  const message = {
+    id: "message_timeout", role: "user", content: [{type: "text", text}],
+    source: {kind: "user", rpcId: "request_timeout"},
+  }
+  const preStep = fixture.emit("agent/pre-step", {agent: fixture.agent, messages: [message]}, () => {
     nextCalled = true
-    return {kind: "enter", messages: []}
+    return {kind: "enter", messages: [message]}
   })
   void preStep.then(() => { admitted = true }, () => {})
   await assert.rejects(
@@ -2826,6 +2834,63 @@ async function nativeDeliveryFixture(t, serverBaseUrl = "https://loop.test", dev
   const service = new CollaborationService(api, {server: serverBaseUrl}, {}, root, namespace.installationId)
   return {store, namespace, api, service, binding, inbox: new CollaborationInbox(store, api)}
 }
+
+test("inbox claim evidence survives replay and excludes cancelled, changed and ended inputs", () => {
+  const p = createCollaborationReceiptProjection()
+  const message = {id: "local-message", role: "user", source: {kind: "user", rpcId: "local-request"},
+    content: [{type: "text", text: "original instruction"}]}
+  const pending = p.apply(p.init(), {type: "agent/inbox/spliced", seq: 0, data: {target: "next-step", start: 0, inserted: [message]}})
+  const claim = outcome => p.apply(structuredClone(pending), {type: "agent/inbox/spliced", seq: 1,
+    data: {target: "next-step", start: 0, removedCount: 1, outcome}})
+  const evidence = (state, input) => {
+    const f = runtimeFixture({}, {projectionState: state})
+    try { return f.collaboration.acceptanceEvidence(SESSION_ID, input) }
+    finally { f.collaboration.dispose() }
+  }
+  assert.equal(evidence(claim(), message).seq, 1)
+  for (const state of [pending, claim("canceled"), p.apply(claim(), {type: "turn/end"})]) {
+    assert.throws(() => evidence(state, message), /No matching Session inbox claim/)
+  }
+  for (const changed of [{...message, id: "other"}, {...message, source: {kind: "user", rpcId: "other"}},
+    {...message, content: [{type: "text", text: "changed instruction"}]}]) {
+    assert.throws(() => evidence(claim(), changed), /No matching Session inbox claim/)
+  }
+})
+
+test("two selected agents activate once through native validation with the exact inbox claim", async t => {
+  const n = await nativeDeliveryFixture(t)
+  const requests = []
+  const lookup = n.api.request
+  n.api.request = async (area, method, path, body) => {
+    if (method === "GET") return lookup(area, method, path)
+    assert.equal(path, "/collaboration/intents")
+    requests.push(body)
+    return {userIntentId: "accepted-first-turn"}
+  }
+  const f = runtimeFixture({
+    collaborationPrepareIntent: input => n.service.prepareIntent(input),
+    collaborationCancel: input => n.service.cancel(input),
+    collaborationBindIntent: input => n.service.bindIntent(input),
+    collaborationActivateIntent: input => n.service.activateIntent(input),
+  })
+  t.after(() => f.collaboration.dispose())
+  const targets = ["worker", "tester"].map(targetId => ({targetType: "agent", targetId, intendedActions: ["dispatch", "followup"]}))
+  const mentions = targets.map(({targetId}) => `@[${targetId}](loop-collaboration:agent/${targetId})`).join(" ")
+  await f.collaboration.prepareIntent({sessionId: SESSION_ID, serializedText: mentions, activateOnClaim: true,
+    bindingRevision: "3", references: targets, shareScope: {scope: "task-description", resourceRefs: [], expandedAudience: true}})
+  const message = {id: "original", role: "user", source: {kind: "user", rpcId: "first-turn"},
+    content: [{type: "text", text: mentions + " implement and test"}]}
+  const step = messages => f.emit("agent/pre-step", {agent: f.agent, messages: [message]}, () => ({kind: "enter", messages}))
+  await step([])
+  assert.equal(requests.length, 0)
+  await step([message])
+  f.emit("session/event", f.agent.session, {type: "user/message", seq: 5, data: message})
+  const active = Object.values((await n.store.load(n.namespace)).intents).filter(intent => intent.state === "activated")
+  assert.equal(active.length, 1)
+  assert.equal(stringifyWire(active[0].acceptedSequence), "4")
+  assert.equal(requests.length, 1)
+  assert.deepEqual(requests[0].targetIds, ["worker", "tester"])
+})
 
 test("native push reconciliation requests snapshot recovery on the original route after a rebind", async t => {
   const n = await nativeDeliveryFixture(t)
