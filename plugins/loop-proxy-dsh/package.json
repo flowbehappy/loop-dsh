@@ -1,6 +1,6 @@
 {
   "name": "@pingkai/loop-dsh",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Trusted DeepSeek Harness Web and Desktop bridge for an operator-bound Loop connection",
   "type": "module",
   "main": "host.mjs",
