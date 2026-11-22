@@ -16,7 +16,7 @@ import {randomUUID,randomBytes,createHash} from "node:crypto"
 import {HostCredentialStore, serviceURL} from "./credentials.ts"
 import type {CredentialProvider, Credential} from "./credentials.ts"
 import {TokenManager, LoopHTTP} from "./http.ts"
-import {ActionClient, readNamedChannel} from "./actions.ts"
+import {ActionClient, readNamedChannel, requestHumanDM, shareDocumentLink} from "./actions.ts"
 import {beginHostLogin} from "./oauth.ts"
 import type {HostLogin} from "./oauth.ts"
 import {LoopError, requireActive} from "./errors.ts"
@@ -173,6 +173,12 @@ export class LoopBackend {
   }
   channelHistory(context: ActionContext, args: Record<string,unknown>, prepare: boolean, signal?: AbortSignal, priorDenial?: LoopError) {
     return this.action(context, signal, (client, combined) => readNamedChannel(client,args,prepare,combined,priorDenial))
+  }
+  humanDM(context: ActionContext, name: string, args: Record<string,unknown>, signal?: AbortSignal) {
+    return this.action(context,signal,(client,combined)=>requestHumanDM(client,name,args,combined))
+  }
+  shareLink(context: ActionContext, args: Record<string,unknown>, base: string, workspace: string, signal?: AbortSignal) {
+    return this.action(context,signal,(client,combined)=>shareDocumentLink(client,args,base,workspace,combined),true)
   }
   describe(context: ActionContext, name: string, signal?: AbortSignal) {
     return this.action(context, signal, (client, combined) => client.describe(name, combined))

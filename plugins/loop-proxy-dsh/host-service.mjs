@@ -5,7 +5,7 @@ import {RemoteError, TypertRemoteService} from "@deepseek-ai/dsh-typert-protocol
 import {defineTool} from "@deepseek-ai/dsh-tools"
 
 import {BindingStore} from "./binding-store.mjs"
-import {HumanTaskConsent} from "./host-human-task.mjs"
+import {HumanTaskConsent, requestsHumanIdentity, userText} from "./host-human-task.mjs"
 import {LoopCollaborationRuntime} from "./host-collaboration.mjs"
 import {saveExplicitDefaultModel} from "./host-default-model.mjs"
 import {LoopSkillRuntime} from "./host-loop-skills.mjs"
@@ -72,27 +72,50 @@ export default class LoopHostService extends TypertRemoteService {
       withSessionContext: (sessionId, signal, operation) => this.runtime.withSessionContext(sessionId, signal, operation),
     })
     this.humanTasks = new HumanTaskConsent({
-      owner: (id,signal) => this.runtime.humanTaskOwner(id,signal),
+      owner: (id,signal,action) => this.runtime.humanTaskOwner(id,signal,action),
       current: id => this.collaboration.currentUserInputs.get(id)?.message,
       request: (...args) => this.runtime.humanConnectionRequest(...args),
     })
     this.channelReads = new WeakSet()
-    ctx.tools.register(defineTool({
-      name:"loop_channel_history",
-      description:"Read and summarize the conversation in a named Loop channel. Pass the user's literal channel name or #slug. Resolves the directory, asks for single-channel read access when needed, and returns the verified channel's messages.",
-      parameters:{
-        channelName:{type:"string",required:true,description:"Exact display name or #slug from the user."},
-        limit:{type:"integer",description:"Number of recent messages (1–100)."},
-      },
-      output:{schema:{type:"string"},render:(_args,value)=>[{type:"text",text:value}]},
-      execute:async (args,exec) => {
-        const sessionId = exec.agent?.session?.id
-        if (!sessionId || !this.humanTasks.current(sessionId)) throw new Error("A current user request is required.")
-        const result = await this.agentCommand(sessionId,{verb:"call",name:"message.history",input:JSON.stringify(args)},exec.signal)
-        if (result.failed) throw new Error(result.output)
-        return result.output
-      },
-    }),{when:({agent})=>this.canUseAgentActions() && !this.collaboration.isFeedbackTurn(agent?.session?.id)})
+    const registerActionTool = (name,description,parameters,toCommand) => {
+      ctx.tools.register(defineTool({
+        name,description,parameters,
+        output:{schema:{type:"string"},render:(_args,value)=>[{type:"text",text:value}]},
+        execute:async (args,exec) => {
+          const sessionId = exec.agent?.session?.id
+          if (!sessionId || !this.humanTasks.current(sessionId)) throw new Error("A current user request is required.")
+          const [action,input] = toCommand(args)
+          const result = await this.agentCommand(sessionId,{verb:"call",name:action,input:JSON.stringify(input)},exec.signal)
+          if (result.failed) throw new Error(result.output)
+          return result.output
+        },
+      }),{when:({agent})=>this.canUseAgentActions() && !this.collaboration.isFeedbackTurn(agent?.session?.id)})
+    }
+    const channelName = {type:"string",required:true,description:"Exact display name or #slug from the user."}
+    registerActionTool("loop_channel_history","Read or summarize messages in a named Loop channel. The Agent may see only some participants. For the user's own view or a complete summary from their perspective choose readAs=human, which requests single-channel read-only access.",{
+      channelName,readAs:{type:"string",enum:["agent","human"]},limit:{type:"integer",description:"Number of recent messages (1–100)."},
+    },args=>["message.history",args])
+    registerActionTool("loop_direct_message","Read or send a private Loop message in the user's conversation with a colleague. Resolve the exact Human member with workspace.list first. Uses the user's own identity with scoped confirmation.",{
+      memberId:{type:"string",required:true,description:"Exact Loop Human member ID."},
+      operation:{type:"string",required:true,enum:["read","send"]},
+      content:{type:"string",description:"Exact requested message for send."},
+      clientMessageId:{type:"string",description:"Stable retry key required for send. Reuse it when retrying."},
+    },({memberId,operation,content,clientMessageId})=>{
+      if (!/^[a-z0-9]{12}$/u.test(memberId) || !["read","send"].includes(operation)) throw new Error("Select the exact Loop member and operation.")
+      if (operation==="send" && (!content?.trim() || !clientMessageId?.trim())) throw new Error("Supply content and a stable retry key.")
+      return [operation==="send"?"message.send":"message.history",{target:"dm:@"+memberId,asHuman:true,...(operation==="send"?{content,clientMessageId}:{})}]
+    })
+    registerActionTool("loop_share_document_link","Share a Loop knowledge-base document link in a named Loop channel. Sends only the verified URL. Recipient access depends on existing KB permissions. For an ordinary request to send a link so colleagues can open it, send the link. Set requireRecipientAccess only for an explicit instruction to withhold delivery unless access is verified.",{
+      channelName,documentId:{type:"string",required:true},requireRecipientAccess:{type:"boolean",description:"Default false. True only for an explicit condition such as 'only send after confirming everyone has access'."},clientMessageId:{type:"string",required:true,description:"Stable retry key."},
+    },args=>["kb.share-document-link",args])
+    registerActionTool("loop_schedule_message","Schedule a message on the Loop server for delivery in a named Loop channel. The schedule is stored and managed in Loop.",{
+      target:{type:"string",required:true,description:"Exact Loop channel #slug."},template:{type:"string",required:true},
+      name:{type:"string",required:true},delaySeconds:{type:"integer",description:"Delay from creation in seconds."},
+      at:{type:"string",description:"Absolute ISO timestamp with timezone, instead of delaySeconds."},idempotencyKey:{type:"string",required:true},
+    },({target,template,name,delaySeconds,at,idempotencyKey})=>{
+      if (!/^#[a-z0-9][a-z0-9-]*$/u.test(target) || (delaySeconds===undefined)===(at===undefined)) throw new Error("Supply an exact #slug and one delivery time.")
+      return ["scheduled-message.create",{target,template,name,idempotencyKey,schedule:at===undefined?{kind:"after",seconds:delaySeconds}:{kind:"at",at}}]
+    })
     ctx.effect(() => this.runtime.addSessionInvalidationListener(ids => {
       for (const id of ids) this.collaboration.clearSessionActivation(id)
     }), "loop-proxy-dsh-host: invalidate collaboration intents")
@@ -408,6 +431,7 @@ export default class LoopHostService extends TypertRemoteService {
   humanCommand(sessionId, command, signal) {
     if (command.name === "task.create" && command.verb === "call") this.collaboration.checkDispatchRetry(sessionId,command)
     if (command.verb === "authorize") return this.humanTasks.authorize(sessionId, command, signal)
+    checkDocumentShare(command,this.humanTasks.current(sessionId),this.runtime.serviceBaseUrl)
     this.checkChannelRead(this.humanTasks.current(sessionId),command)
     const task = this.humanTasks.forCommand(sessionId, command)
     return this.runtime.humanCommand(sessionId, command, signal, () => this.humanTasks.current(sessionId) === task.message, task.grant)
@@ -428,6 +452,15 @@ export default class LoopHostService extends TypertRemoteService {
       const selected = await this.humanTasks.pick(sessionId,message,command.name,signal)
       return {failed:false,output:JSON.stringify(selected)}
     }
+    checkDocumentShare(command,message,this.runtime.serviceBaseUrl)
+    if (command.verb === "call" && ["message.send","message.history"].includes(command.name) && requestsHumanIdentity(message)) {
+      const args = JSON.parse(command.input)
+      if (/^dm:@[a-z0-9]{12}$/u.test(args.target)) command = {...command,input:JSON.stringify({...args,asHuman:true})}
+      else if (command.name === "message.history" && (args.channelName || /^#[a-z0-9][a-z0-9-]*$/u.test(args.target))) {
+        const {target,...page} = args
+        command = {...command,input:JSON.stringify({...page,channelName:args.channelName || target,readAs:"human"})}
+      }
+    }
     this.checkChannelRead(message,command)
     const args = command.verb === "call" && command.name === "message.history" ? JSON.parse(command.input) : {}
     const named = message && (typeof args.channelName === "string" || /^#[a-z0-9][a-z0-9-]*$/u.test(args.target))
@@ -445,7 +478,7 @@ export default class LoopHostService extends TypertRemoteService {
       if (named) this.channelReads.add(message)
       const input = result.delegationArguments ? JSON.stringify(result.delegationArguments) : command.input
       const summary = result.channelLabel ? "Read channel history: "+result.channelLabel : description
-      const grant = await this.humanTasks.offer(sessionId, message, result.owner, result.delegation, summary, signal, input)
+      const grant = await this.humanTasks.offer(sessionId, message, result.owner, result.delegation, summary, signal, input, result.agentDenied)
       const response = await this.runtime.humanCommand(sessionId, {...command,input,principal:"human",connection:grant.policy.connection}, signal,
         () => this.humanTasks.current(sessionId) === message, grant)
       if (named && !response.failed) {
@@ -483,6 +516,23 @@ export default class LoopHostService extends TypertRemoteService {
       })
     }
   }
+}
+
+// The generic send action can also be chosen for a link share. A retrieved KB
+// document is authorized for its reader, independently of the destination.
+export function checkDocumentShare(command,message,base) {
+  if (!base || command.verb !== "call" || command.name !== "message.send") return
+  const instruction = userText(message)
+  if (!instruction) return
+  const {content,target,attachmentIds} = JSON.parse(command.input)
+  if (typeof content !== "string" || !content.includes("/documents/")) return
+  const links = content.match(/(?:https?:\/\/[^\s<>()]+)?\/(?:w\/ws_[a-z0-9_-]+\/)?kb\/kb_[a-z0-9_-]+\/documents\/doc_[a-z0-9_-]+/giu) ?? []
+  const origin = new URL(base).origin
+  const boundLinks = links.filter(link=>URL.canParse(link,base) && new URL(link,base).origin === origin)
+  if (!boundLinks.length) return
+  const extra=boundLinks.reduce((text,link)=>text.replace(link,""),content).trim()
+  if (!attachmentIds?.length && (!extra || instruction.includes(content.trim()))) return
+  throw new Error("The proposed message includes text alongside a Loop document link. For a link share, use loop_share_document_link with the exact channel, document ID and the original retry key, or send just the URL. To send additional prose, confirm its exact wording with the user first. No message was sent to "+target+".")
 }
 
 function bounded(value) {

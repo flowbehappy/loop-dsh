@@ -351,6 +351,26 @@ export class NativeHostActions {
       case "agentSchema":
       case "agentAction": {
         if(action==="agentAction" && (!input.workspaceId || !input.sessionId))throw new LoopError("loop-host/invalid-request","Host Workspace and Session are required")
+        if (action==="agentSchema" && input.personalSchema === true) {
+          try {
+            const domain = input.name.split(".")[0]
+            const catalog = await this.backend.catalog(context,combined,domain,true)
+            const descriptor = catalog.find(entry=>entry.id===input.name)
+            if (descriptor) return descriptor
+            // Older deployments only publish exact-action delegation previews.
+            return await this.backend.delegationPreview(context,input.name,undefined,combined)
+          } catch (error) {
+            if (error instanceof LoopError && error.status===404 && error.code==="unknown_action") {
+              throw new LoopError("unknown_action","Loop does not offer personal authorization for that action. Discover the published action first. For private messages use loop_direct_message with the exact Human member ID.",404)
+            }
+            throw error
+          }
+        }
+        if (action==="agentAction" && input.name==="kb.share-document-link") return this.backend.shareLink(context,input.arguments,this.config.serviceBaseUrl,this.workspace,combined)
+        if (action==="agentAction" && ["message.send","message.history"].includes(input.name) && input.arguments?.asHuman === true) {
+          if (!input.prepareDelegation) throw new LoopError("forbidden","Human confirmation is unavailable for this request.",403)
+          return this.backend.humanDM(context,input.name,input.arguments,combined)
+        }
         if (action==="agentAction" && input.name==="message.history" && Object.hasOwn(input.arguments ?? {}, "channelName")) {
           return this.backend.channelHistory(context,input.arguments,Boolean(input.prepareDelegation),combined)
         }

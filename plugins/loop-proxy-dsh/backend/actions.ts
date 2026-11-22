@@ -56,10 +56,9 @@ export class ActionClient {
 
 // Use the Agent-visible directory only. A directory entry identifies a channel;
 // ordinary Agent reads and scoped Human reads still enforce their respective ACLs.
-export async function readNamedChannel(client: ActionClient, args: Record<string,unknown>, prepare: boolean, signal?: AbortSignal, priorDenial?: LoopError) {
-  const {channelName, ...history} = args
+async function resolveChannel(client: ActionClient, channelName: unknown, signal?: AbortSignal) {
   const name = typeof channelName === "string" ? channelName.trim() : ""
-  if (!name || name.length > 200 || Object.hasOwn(history, "target")) {
+  if (!name || name.length > 200) {
     throw new LoopError("validation", "Supply one channel name or #slug.", 400)
   }
   const result = await client.invoke("workspace.list", {kind:"channels",channelName:name,limit:10}, signal)
@@ -77,26 +76,65 @@ export async function readNamedChannel(client: ActionClient, args: Record<string
       channel.name !== slug && (name.startsWith("#") || channel.displayName?.toLowerCase() !== label)) {
     throw new LoopError("loop-host/backend-invalid","Loop did not resolve the requested channel to an exact ID.")
   }
+  return channel
+}
+
+async function exactConsent(client: ActionClient, action: string, args: Record<string,unknown>, resource: string, signal?: AbortSignal, denial?: LoopError) {
+  const delegation = await client.delegationPreview(action,args,signal)
+  if (delegation?.action !== action || delegation.write !== (action === "message.send") || delegation.manage !== false ||
+      delegation.workspaceWide !== false || delegation.resourceConstraints?.length !== 1 || delegation.resourceConstraints[0] !== resource) {
+    throw new LoopError("loop-host/backend-invalid","Loop did not confirm the exact "+(action === "message.history" ? "read-only authorization" : "write authorization")+".")
+  }
+  return {error:{code:denial?.code ?? "human_confirmation_required",message:denial?.message ?? "Confirm the requested Human identity."},delegation,delegationArguments:args}
+}
+
+export async function readNamedChannel(client: ActionClient, args: Record<string,unknown>, prepare: boolean, signal?: AbortSignal, priorDenial?: LoopError) {
+  const {channelName,readAs="agent",...history} = args
+  if (Object.hasOwn(history,"target") || !["agent","human"].includes(String(readAs))) throw new LoopError("validation","Invalid channel history request.",400)
+  const channel = await resolveChannel(client,channelName,signal)
   const target = "#"+channel.name
   let direct
-  try {
-    if (priorDenial) throw priorDenial
-    direct = await client.invoke("message.history", {...history,target}, signal)
-  } catch (error) {
-    if (!prepare || !(error instanceof LoopError) || error.outcomeUnknown || !permissionDenied(error)) throw error
-    const canonical = "channel:"+channel.channelId
-    const delegationArguments = {...history,target:canonical}
-    const delegation = await client.delegationPreview("message.history",delegationArguments,signal)
-    if (delegation?.action !== "message.history" || delegation.write !== false || delegation.manage !== false ||
-        delegation.workspaceWide !== false || delegation.resourceConstraints?.length !== 1 || delegation.resourceConstraints[0] !== canonical) {
-      throw new LoopError("loop-host/backend-invalid","Loop did not confirm read-only authorization for the requested channel.")
+  if (readAs !== "human" && !priorDenial) {
+    try { direct = await client.invoke("message.history",{...history,target},signal) }
+    catch (error) {
+      if (!(error instanceof LoopError) || error.outcomeUnknown || !permissionDenied(error)) throw error
+      priorDenial = error
     }
-    return {error:{code:error.code,message:error.message},delegation,delegationArguments,channelLabel:channel.displayName || target}
+  }
+  if (readAs === "human" || priorDenial) {
+    if (!prepare) throw priorDenial ?? new LoopError("forbidden","Human confirmation is unavailable for this request.",403)
+    const canonical = "channel:"+channel.channelId
+    return {...await exactConsent(client,"message.history",{...history,target:canonical},canonical,signal,priorDenial),channelLabel:channel.displayName || target}
   }
   if (direct?.data?.data?.targetKey !== channel.channelId) {
     throw new LoopError("loop-host/conflict", "The returned history does not match the selected Loop channel.")
   }
   return direct
+}
+
+export async function requestHumanDM(client: ActionClient, action: string, args: Record<string,unknown>, signal?: AbortSignal) {
+  const {asHuman,...input} = args
+  const peer = /^dm:@([a-z0-9]{12})$/u.exec(String(input.target))?.[1]
+  if (asHuman !== true || !peer || !["message.send","message.history"].includes(action)) throw new LoopError("validation","Use the exact Human member ID.",400)
+  return exactConsent(client,action,input,"dm:@"+peer,signal)
+}
+
+export async function shareDocumentLink(client: ActionClient,args: Record<string,unknown>,base: string,workspace: string,signal?: AbortSignal) {
+  const {channelName,documentId,clientMessageId,requireRecipientAccess=false} = args
+  if (!/^doc_[a-z0-9_-]+$/u.test(String(documentId)) || typeof clientMessageId !== "string" || !clientMessageId.trim() ||
+      typeof requireRecipientAccess !== "boolean" || Object.keys(args).some(key=>!["channelName","documentId","clientMessageId","requireRecipientAccess"].includes(key))) throw new LoopError("validation","Document, channel and retry key are required.",400)
+  const channel = await resolveChannel(client,channelName,signal)
+  const receipt = await client.invoke("kb.doc-read",{documentId,format:"text",maxBytes:4},signal)
+  const doc = receipt?.data?.data
+  if (doc?.documentId !== documentId || !/^kb_[a-z0-9_-]+$/u.test(doc?.kbId) || !/^ws_[a-z0-9_-]+$/u.test(workspace)) throw new LoopError("loop-host/backend-invalid","Loop did not verify this document.")
+  const url = base+"/w/"+workspace+"/kb/"+doc.kbId+"/documents/"+documentId
+  if (requireRecipientAccess) {
+    // A sender-side document read cannot establish access for every channel recipient.
+    return {data:{data:{state:"not_sent",recipientAccess:"unverified",webUrl:url}},accessNote:"Delivery requires confirmed recipient access. No channel message was sent."}
+  }
+  const sent = await client.invoke("message.send",{target:"#"+channel.name,expectedScopeId:channel.channelId,content:url,clientMessageId},signal)
+  if (!sent?.data?.data?.messageId) throw new LoopError("loop-host/backend-invalid","Loop did not confirm delivery.")
+  return {...sent,webUrl:url,recipientAccess:"unverified",accessNote:"Recipients use their existing knowledge base permissions."}
 }
 
 export function permissionDenied(error: LoopError) {

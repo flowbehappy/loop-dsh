@@ -1550,10 +1550,19 @@ export class LoopHostRuntime {
     return {workspace, loopWorkspaceId: this.loopWorkspaceId || originalWorkspace}
   }
 
-  humanTaskOwner(sessionId, signal) {
+  humanTaskOwner(sessionId, signal, requestedAction) {
     return this.withConnectionLease(signal, async () => {
-      await this.businessWorkspace(sessionId)
-      return {serviceBaseUrl:this.serviceBaseUrl, accountPrincipal:this.accountPrincipal, loopWorkspaceId:this.loopWorkspaceId || undefined}
+      const {workspace} = await this.businessWorkspace(sessionId)
+      let readOnly
+      if (requestedAction && this.canUseAgentActions()) {
+        const contract = await this.actions.agentSchema({workspaceId:workspace.id, sessionId, accountPrincipal:this.accountPrincipal,
+          name:requestedAction, personalSchema:true},signal)
+        readOnly = contract?.readOnly
+        if (contract?.action !== requestedAction && contract?.id !== requestedAction) {
+          throw failure("loop-host/invalid-request","Loop did not confirm this personal action. Discover an available action before requesting consent.")
+        }
+      }
+      return {serviceBaseUrl:this.serviceBaseUrl, accountPrincipal:this.accountPrincipal, loopWorkspaceId:this.loopWorkspaceId || undefined,...(typeof readOnly === "boolean" ? {readOnly} : {})}
     })
   }
 
@@ -1718,7 +1727,7 @@ export class LoopHostRuntime {
     const preparation = prepareDelegation ? {prepareDelegation:true,
       ...(command.verb === "call" ? {delegationArguments:JSON.parse(command.input)} : {})} : {}
     const permissionResult = ({error,delegation,delegationArguments,channelLabel}) => command.verb === "call"
-      ? {failed:true,output:boundedJSON({error}),delegation,delegationArguments,channelLabel}
+      ? {failed:true,output:boundedJSON({error}),delegation,delegationArguments,channelLabel,agentDenied:error?.code!=="human_confirmation_required"}
       : {failed:false,output:boundedJSON({id:command.name,requiresHumanAuthorization:true,inputSchema:delegation.inputSchema,
           next:"For the user's requested operation, use loop-proxy call with these concrete arguments. The Host asks the user for approval in this conversation."})}
     if (command.verb === "actions") {
@@ -1799,7 +1808,9 @@ export class LoopHostRuntime {
       const webUrl = !result.error && resultWebUrl(command.name, result.data?.data, this.serviceBaseUrl, loopWorkspaceId)
       return {
         failed: Boolean(result.error),
-        output: boundedJSON(webUrl ? {...result, webUrl} : result),
+        output: boundedJSON(command.name === "message.history" && !result.error ? {...result,
+          visibility:"Messages visible to this Agent only. Other participants may see additional messages, even when hasMore is false."}
+          : webUrl ? {...result, webUrl} : result),
       }
     }
     throw failure("loop-host/invalid-request", "Loop Agent command is invalid")

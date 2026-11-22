@@ -110,3 +110,34 @@ test("project and KB selection return only the chosen locator to the original re
   await assert.rejects(tasks.pick("chat",message,"project",abort.signal),/already declined/)
   assert.throws(()=>tasks.forCommand("chat",command))
 })
+
+test("a request to act for the user preserves positive and negative identity intent",async()=>{
+  const {requestsHumanIdentity}=await import('../host-human-task.mjs')
+  for (const text of ['请明确代表我本人发送','Please send on my behalf']) assert.equal(requestsHumanIdentity(input(text)),true)
+  for (const text of ['不要代表我本人回复',"Do not send on my behalf"]) assert.equal(requestsHumanIdentity(input(text)),false)
+})
+
+test("an unpublished action cannot open a personal consent card",async t=>{
+  const message=input("请代表我本人私聊同事")
+  const tasks=new HumanTaskConsent({current:()=>message,
+    owner:async(_session,_signal,action)=>{assert.equal(action,"direct-message.send");throw new Error("unpublished action")},
+    request:async()=>assert.fail("no authorization should start")})
+  t.after(()=>tasks.dispose())
+  await assert.rejects(tasks.authorize("chat",{...command,name:"direct-message.send"},new AbortController().signal),/unpublished action/)
+  assert.equal(tasks.pending.size,0)
+})
+
+test("manual authorization derives omitted write scope from the published action",async t=>{
+  const signal=new AbortController().signal
+  const message=input("请代表我本人给同事发私聊")
+  const owner={serviceBaseUrl:"https://loop.example",accountPrincipal:"user",loopWorkspaceId:"workspace"}
+  const tasks=new HumanTaskConsent({current:()=>message,owner:async(_id,_s,action)=>action?{...owner,readOnly:false}:owner,
+    request:async()=>assert.fail("unexpected connection request")})
+  t.after(()=>tasks.dispose())
+  tasks.confirm=async(_session,_message,{policy})=>({policy})
+  const send={...command,name:"message.send",input:JSON.stringify({summary:"Send the approved DM",resourceConstraints:["dm:@abcdefghijkl"]})}
+  await tasks.authorize("chat",send,signal)
+  assert.equal(tasks.approved.get(message).policy.write,true)
+  const readOnly={...send,input:JSON.stringify({...JSON.parse(send.input),write:false})}
+  await assert.rejects(tasks.authorize("chat",readOnly,signal),/published Loop action/)
+})

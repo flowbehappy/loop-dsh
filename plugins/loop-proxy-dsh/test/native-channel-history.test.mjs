@@ -58,3 +58,11 @@ test('only a definitive permission denial may prompt for the exact read-only sco
     assert.equal(api.calls.length,2)
   }
 })
+
+test('explicit Human view requests one read grant even when the Agent can read', async () => {
+  const api = fixture()
+  const result = await readNamedChannel(api,{...request,readAs:'human'},true)
+  assert.deepEqual(result.delegationArguments,{limit:5,target:'channel:chn_abc'})
+  assert.deepEqual(api.calls.map(([action])=>action),['workspace.list','preview'])
+  await assert.rejects(readNamedChannel(fixture(),{...request,readAs:'human'},false),/confirmation/)
+})

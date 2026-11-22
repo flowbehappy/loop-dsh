@@ -9,16 +9,21 @@ function refusal(message) {
   return Object.assign(new Error(message), {code:"loop-host/waiting-for-access"})
 }
 
-function userText(message) {
+export function userText(message) {
   if (message?.source?.kind !== "user" || !message.source.rpcId) return ""
   return message.content?.filter(block => block.type === "text").map(block => block.text).join("\n").trim() ?? ""
 }
 
-const explicit = /(?:以|使用|用)(?:我(?:本人)?的?|本人的?)(?:名义|名義|身份|身分|账号|帳號|账户|帳戶)|(?:in my (?:own )?name|(?:use|using) my (?:own )?(?:identity|account|name)|act as me)\b|(?:私|わたし)の(?:名前|名義|アカウント)で/iu
+const explicit = /(?:代表我本人|on my behalf)|(?:以|使用|用)(?:我(?:本人)?的?|本人的?)(?:名义|名義|身份|身分|账号|帳號|账户|帳戶)|(?:in my (?:own )?name|(?:use|using) my (?:own )?(?:identity|account|name)|act as me)\b|(?:私|わたし)の(?:名前|名義|アカウント)で/iu
 const assistantOnly = /(?:仅|僅|只)(?:限|用|使用)?(?:助手|智能体|智能體)(?:自己)?(?:的)?(?:权限|權限)|(?:do not|don't|never) (?:ask|request) (?:for )?(?:permission|authorization)|only use (?:the )?(?:assistant|agent)(?:['’]s)? (?:permissions|access)/iu
-const noPersonalAccess = /(?:不要|别|別|禁止|不能|不准|无需|無需|不得|请勿|請勿).{0,12}(?:(?:以|用)(?:我(?:本人)?的?|本人(?:的)?)(?:名义|名義|身份|身分|账号|帳號|账户|帳戶)|(?:请求|請求|申请|申請)(?:我的|个人|個人)?(?:授权|授權))|(?:do not|don't|never|without|not to)\b[^.!?。！？]{0,60}(?:my (?:own )?(?:name|account|identity)|as me)/iu
+const noPersonalAccess = /(?:不要|别|別|禁止|不能|不准|无需|無需|不得|请勿|請勿).{0,12}(?:代表我本人|(?:以|用)(?:我(?:本人)?的?|本人(?:的)?)(?:名义|名義|身份|身分|账号|帳號|账户|帳戶)|(?:请求|請求|申请|申請)(?:我的|个人|個人)?(?:授权|授權))|(?:do not|don't|never|without|not to)\b[^.!?。！？]{0,60}(?:my (?:own )?(?:name|account|identity)|as me|on my behalf)/iu
 
-function taskPolicy(command) {
+export function requestsHumanIdentity(message) {
+  const text = userText(message)
+  return !noPersonalAccess.test(text) && !assistantOnly.test(text) && (explicit.test(text) || /^\s*\/as-me(?:\s|$)/u.test(text))
+}
+
+function taskPolicy(command, readOnly) {
   const input = JSON.parse(command.input)
   if (typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > 400 ||
       Object.keys(input).some(key => !["summary","resourceConstraints","manage","write","workspaceWide"].includes(key))) {
@@ -27,7 +32,10 @@ function taskPolicy(command) {
   const policy = humanLoginSchema.parse({connection:command.connection,allowedActions:[command.name],
     resourceConstraints:input.resourceConstraints,manage:input.manage})
   if (input.write !== undefined && typeof input.write !== "boolean") throw refusal("write must be a boolean")
-  policy.write = policy.manage || input.write === true
+  if (readOnly === false && input.write === false && !policy.manage) {
+    throw refusal("The requested permission does not match the published Loop action.")
+  }
+  policy.write = policy.manage || input.write === true || readOnly === false
   if ((policy.resourceConstraints.length === 0) !== (input.workspaceWide === true)) {
     throw refusal("Specify exact resource locators, or explicitly request workspaceWide for an action covering all accessible resources.")
   }
@@ -126,7 +134,7 @@ export class HumanTaskConsent {
     }
   }
 
-  async offer(sessionId, message, owner, preview, description, signal, input = "") {
+  async offer(sessionId, message, owner, preview, description, signal, input = "", agentDenied = true) {
     if (this.current(sessionId) !== message || !this.canOffer(message)) throw refusal("The originating user request changed.")
     const {action, resourceConstraints, manage, write, workspaceWide} = preview
     const summary = (typeof description === "string" && description.trim()) || preview.summary || action
@@ -144,7 +152,7 @@ export class HumanTaskConsent {
     }
     history.requests.add(requestKey)
     try {
-      return await this.confirm(sessionId,message,policy,signal,owner)
+      return await this.confirm(sessionId,message,policy,signal,owner,agentDenied)
     } catch (error) {
       history.declined.add(action)
       throw error
@@ -153,16 +161,17 @@ export class HumanTaskConsent {
 
   async authorize(sessionId,command,signal) {
     const message = this.current(sessionId)
-    const text = userText(message)
-    if (!this.canOffer(message) || !(explicit.test(text) || /^\s*\/as-me(?:\s|$)/u.test(text))) {
+    if (!this.canOffer(message) || !requestsHumanIdentity(message)) {
       throw refusal("Personal mode requires a direct instruction. For ordinary requests use the Agent action first. The Host will offer personal authorization if appropriate.")
     }
-    const grant = await this.confirm(sessionId,message,taskPolicy(command),signal)
+    const owner = await this.owner(sessionId,signal,command.name)
+    const policy = taskPolicy(command,owner.readOnly)
+    const grant = await this.confirm(sessionId,message,policy,signal,owner)
     this.approved.set(message,grant)
     return {failed:false,output:JSON.stringify({authorized:true,connection:grant.policy.connection,action:command.name,resources:grant.policy.resourceConstraints})}
   }
 
-  async confirm(sessionId,message,{policy,policyKey,summary},signal,deniedOwner) {
+  async confirm(sessionId,message,{policy,policyKey,summary},signal,expectedOwner,agentDenied = false) {
     if (this.pending.has(sessionId)) throw refusal("Finish the pending authorization in this task.")
     const cancel = new AbortController()
     const active = AbortSignal.any([signal,this.control.signal,cancel.signal,AbortSignal.timeout(300_000)])
@@ -178,8 +187,8 @@ export class HumanTaskConsent {
     try {
       const route = await this.owner(sessionId,active)
       check()
-      if (deniedOwner && (route.serviceBaseUrl !== deniedOwner.serviceBaseUrl || route.accountPrincipal !== deniedOwner.accountPrincipal ||
-          route.loopWorkspaceId !== deniedOwner.loopWorkspaceId)) throw refusal("The original Loop connection changed.")
+      if (expectedOwner && (route.serviceBaseUrl !== expectedOwner.serviceBaseUrl || route.accountPrincipal !== expectedOwner.accountPrincipal ||
+          route.loopWorkspaceId !== expectedOwner.loopWorkspaceId)) throw refusal("The original Loop connection changed.")
       target = {...route,connection:policy.connection,includeGrant:true}
       // Recognize a matching connection made by the older settings page.
       let status = await this.request("humanStatus",target,active)
@@ -191,7 +200,7 @@ export class HumanTaskConsent {
       if (!status.accountPrincipal || !status.workspaceId) throw refusal("Sign in to Loop first.")
       const owner = {serviceBaseUrl:route.serviceBaseUrl,accountPrincipal:status.accountPrincipal,workspaceId:status.workspaceId}
       target = {...target,accountPrincipal:owner.accountPrincipal,loopWorkspaceId:owner.workspaceId}
-      const details = {requestId,summary,action:policy.allowedActions[0],resources:policy.resourceConstraints,manage:policy.manage,agentDenied:Boolean(deniedOwner)}
+      const details = {requestId,summary,action:policy.allowedActions[0],resources:policy.resourceConstraints,manage:policy.manage,agentDenied}
       if (matches(status.grant,policy)) {
         const originalId = status.grant.id
         const decision = Promise.withResolvers()
