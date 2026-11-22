@@ -2068,10 +2068,8 @@ test("Agent commands resolve the executing Session to its inherited exact target
     assert.equal(calls[1][1].sessionId, "session-new")
     assert.equal(calls[0][1].accountPrincipal, "account-one")
     assert.equal(calls[1][1].accountPrincipal, "account-one")
-    await assert.rejects(
-      runtime.agentCommand("session-old", {verb: "actions", name: ""}),
-      /created before the current Workspace binding/,
-    )
+    actions.agentCatalog = async () => ({actions: ["task.list"]})
+    assert.equal((await runtime.agentCommand("session-old", {verb:"actions", name:"task."})).output, "task.list")
   } finally {
     rmSync(root, {recursive: true, force: true})
   }
@@ -2845,8 +2843,7 @@ test("empty exact action discovery diagnoses permissions without inventing login
     const result = JSON.parse(denied.output)
     assert.equal(result.error.code, "action_not_granted")
     assert.equal(result.error.hint, "Server recovery hint")
-    assert.match(result.recovery, /\/settings\/account/u)
-    assert.doesNotMatch(result.recovery, /expired|sign in again/u)
+    assert.equal(result.recovery, undefined)
     code = "unknown_action"
     const missing = JSON.parse((await runtime.agentCommand("session-one", {verb: "actions", name: "channel.agent-add"})).output)
     assert.equal(missing.error.code, "unknown_action")
@@ -2883,7 +2880,7 @@ test("empty exact action discovery diagnoses permissions without inventing login
     }
     assert.equal((await runtime.agentCommand("session-one", implicit)).failed, false)
 
-    runtime.ensureSessionContextLocked = async () => ({workspace, context: {state: "inherited", loopWorkspaceId: "ws_one"}})
+    runtime.loopWorkspaceId = "ws_one"
     for (const [name, data, path] of [
       ["kb.doc-read", {kbId: "kb_a", documentId: "doc_b"}, "/kb/kb_a/documents/doc_b"],
       ["task.get", {detail: {task: {channelRef: "chn_a", taskNumber: 2}}}, "/inbox/tasks/chn_a/2"],

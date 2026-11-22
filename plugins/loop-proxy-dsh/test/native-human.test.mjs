@@ -16,7 +16,7 @@ const allScopes=['loop.human_access','loop.human_write','loop.human_manage','off
 const active=new AbortController().signal
 function fixture(t){
   const seen=[],records=new Map(),grants=new Map(),clients=new Map(),codes=new Map()
-  let rejectNextOwner=false, hostActive=true, nextClient=0, badMetadata=false, deleteFails=false, onSchema, invocationError
+  let rejectNextOwner=false, hostActive=true, nextClient=0, badMetadata=false, deleteFails=false, onSchema, invocationError, availableActions
   let pending=Promise.resolve()
   const provider={readRecord:async key=>structuredClone(records.get(key)),modifyRecord(key,mutate){
     const done=pending.then(async()=>{
@@ -74,7 +74,10 @@ function fixture(t){
       const {accessToken,refreshToken,...publicGrant}=grant;return Response.json(publicGrant)
     }
     const path=new URL(url).pathname.split('/').slice(8)
-    if(url.searchParams.get('limit'))return Response.json({actions:[{id:read},{id:write},{id:'app.catalog'},{id:'app.invoke'},{id:'ungranted.call'}]})
+    const available=availableActions??grant.allowedActions
+    if(url.searchParams.get('limit'))return Response.json({actions:available.map(id=>({id}))})
+    const actionId=decodeURIComponent(method==='GET'?url.pathname.split('/').at(-1):url.pathname.split('/').at(-2))
+    if(!available.includes(actionId))return Response.json({error:{code:'action_not_granted'}},{status:403})
     if(method==='GET'){
       await onSchema?.()
       const id=decodeURIComponent(url.pathname.split('/').at(-1))
@@ -82,7 +85,11 @@ function fixture(t){
     }
     assert.ok(path.includes('invocations'))
     if(invocationError)return Response.json({error:invocationError},{status:403})
-    return Response.json({status:'succeeded',actor:'human',input:JSON.parse(init.body)})
+    const input=JSON.parse(init.body)
+    if(actionId==='app.invoke' && !grant.resourceConstraints.includes('app-action:'+input.extensionName+'/'+input.action)){
+      return Response.json({error:{code:'resource_not_granted'}},{status:403})
+    }
+    return Response.json({status:'succeeded',actor:'human',input})
   }
   const service=new HumanConnectionService({provider,server:base,installation:'install',fetch:fetcher})
   t.after(()=>service.dispose())
@@ -110,7 +117,7 @@ function fixture(t){
   }
   const action=(kind,input,slot='business')=>service.action(owner,slot,kind,input,active)
   return {service,owner,begin,callback,finish,action,grants,seen,records,provider,fetcher,agentStore,businessStore,appsStore,seedAgent,
-    rejectInvocation:error=>{invocationError=error},
+    setAvailable:actions=>{availableActions=actions}, rejectInvocation:error=>{invocationError=error},
     wrongOwner:()=>{rejectNextOwner=true}, badMetadata:()=>{badMetadata=true}, failDelete:()=>{deleteFails=true}, onSchema:fn=>{onSchema=fn},signOut:()=>{hostActive=false;service.detach()}}
 }
 
@@ -153,6 +160,20 @@ test('Human consent verifies PKCE, pins same Human, and routes a separate public
   assert.doesNotMatch(JSON.stringify({connected,result}),/access-code|refresh-code|human-client/)
 })
 
+test('authorized Human commands use the live catalog and invocation, including actions unknown to the plugin',async t=>{
+  const f=fixture(t)
+  const start=await f.begin();await f.callback(start);await f.finish(start)
+  const name='app.future-operation'
+  f.setAvailable([name])
+  assert.deepEqual(await f.action('humanCatalog',{}),{actions:[name]})
+  assert.equal((await f.action('humanSchema',{name})).id,name)
+  const startIndex=f.seen.length
+  assert.equal((await f.action('humanAction',{name,arguments:{},requireReadOnly:false})).actor,'human')
+  f.setAvailable([])
+  await assert.rejects(f.action('humanAction',{name,arguments:{},requireReadOnly:false}),{code:'action_not_granted',status:403})
+  assert.deepEqual(f.seen.slice(startIndex).filter(r=>r.suffix.includes('/actions/')).map(r=>r.method),['POST','POST'])
+})
+
 test('wrong Human account or issuer never publishes the bearer and no fallback is attempted',async t=>{
   const f=fixture(t);await f.seedAgent();f.wrongOwner()
   const first=await f.begin();assert.equal(await f.callback(first),200)
@@ -173,7 +194,7 @@ test('a missing Human resource grant explains the required scope without echoing
   await f.finish(start)
   f.rejectInvocation({code:'resource_not_granted',message:'private upstream detail'})
   await assert.rejects(f.action('humanAction',{name:write,arguments:{taskId:'opaque'},requireReadOnly:false}),error=>{
-    assert.equal(error.code,'loop-host/human-action-rejected')
+    assert.equal(error.code,'resource_not_granted')
     assert.equal(error.status,403)
     assert.match(error.message,/exact resource locators/)
     assert.doesNotMatch(error.message,/private upstream detail/)
@@ -183,8 +204,6 @@ test('a missing Human resource grant explains the required scope without echoing
 
 test('separate App slot, exact locator consent, and grant-scoped disconnect',async t=>{
   const f=fixture(t);const first=await f.begin();await f.callback(first);await f.finish(first)
-  await assert.rejects(f.begin('apps',{allowedActions:['app.invoke'],resourceConstraints:['app:sample']}),{code:'loop-host/invalid-request'})
-  await assert.rejects(f.begin('apps',{allowedActions:[read],resourceConstraints:['app:sample']}),{code:'loop-host/invalid-request'})
   await assert.rejects(f.action('humanCatalog',{},'apps'),{code:'loop-host/needs-auth'})
   const apps=await f.begin('apps',{allowedActions:['app.catalog','app.invoke'],resourceConstraints:['app:sample','app-action:sample/get-item']})
   assert.equal(new URL(apps.challenge.loginUrl).searchParams.get('resource_constraints'),'app-action:sample/get-item,app:sample')
@@ -192,8 +211,8 @@ test('separate App slot, exact locator consent, and grant-scoped disconnect',asy
   assert.notEqual(f.appsStore.key,f.businessStore.key)
   assert.deepEqual(await f.action('humanCatalog',{},'apps'),{actions:['app.catalog','app.invoke']})
   assert.deepEqual(await f.action('humanCatalog',{}),{actions:[read,write]})
-  await assert.rejects(f.action('humanAction',{name:'app.invoke',arguments:{extensionName:'sample',action:'other'},requireReadOnly:false},'apps'),{code:'loop-host/waiting-for-access'})
-  assert.equal(f.seen.some(r=>r.suffix.endsWith('/invocations')),false)
+  await assert.rejects(f.action('humanAction',{name:'app.invoke',arguments:{extensionName:'sample',action:'other'},requireReadOnly:false},'apps'),{code:'resource_not_granted',status:403})
+  assert.equal(f.seen.filter(r=>r.suffix.endsWith('/invocations')).length,1)
   assert.equal((await f.action('humanAction',{name:'app.invoke',arguments:{extensionName:'sample',action:'get-item',input:{}},requireReadOnly:false},'apps')).actor,'human')
   const token=(await f.appsStore.read()).access_token
   const detached=await f.service.disconnect(f.owner,'apps',active)
@@ -209,7 +228,7 @@ test('rejects off-origin discovery and sign-out fences a Human action after sche
   assert.equal(bad.seen.some(r=>r.method==='POST'),false)
   const f=fixture(t);const start=await f.begin();await f.callback(start);await f.finish(start)
   f.onSchema(f.signOut)
-  await assert.rejects(f.action('humanAction',{name:write,requireReadOnly:false}),/cancelled|detached/)
+  await assert.rejects(f.action('humanAction',{name:read}),/cancelled|detached/)
   assert.equal(f.seen.some(r=>r.suffix.endsWith('/invocations')),false)
   assert.equal((await f.service.status(undefined,'business',active)).state,'signed_out')
 })

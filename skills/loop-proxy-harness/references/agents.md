@@ -35,7 +35,7 @@ collaboration tools, `memberId` identifies the workspace member, and `agentId`
 (Agents only) is used by channel invitations and resolved message mentions.
 When present, `mention` is the server-formatted text to copy into a channel or
 topic message; read the messages guide for delivery rules. Capabilities are
-operation-specific, not general reachability guarantees. To resolve an accepted target,
+hints from the directory. Submit the requested operation to Loop for its current access decision. To resolve an accepted target,
 query its exact `targetId` and require an exact `targetId` match in the result;
 do not infer the mapping from names or substitute one ID for another.
 

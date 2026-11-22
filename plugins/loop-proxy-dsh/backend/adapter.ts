@@ -96,6 +96,11 @@ export class NativeHostActions {
     this.writers.add(writer)
     return writer
   }
+  private async connectionIdentity():Promise<{state:"signed_out"}|{state:"signed_in";accountPrincipal:string;workspaceId:string;grantId:string}>{
+    const current=this.workspace && await new HostCredentialStore(this.options.provider,this.config.serviceBaseUrl,this.workspace,this.config.installationId).read()
+    if(!current || current.disconnect || this.accountDisconnect)return {state:"signed_out"}
+    return {state:"signed_in",accountPrincipal:current.principal_id,workspaceId:current.workspace_id,grantId:current.grant_id}
+  }
   private async observe(principal:string){
     requireActive(this.control.signal)
     // Catalog reads must not publish an account-change event: the Host model
@@ -263,7 +268,7 @@ export class NativeHostActions {
     }
     if(action==="accountStatus")return this.workspace?this.backend.accountStatus(this.workspace,combined):{state:"signed_out"}
     if(action==="modelStatus"){
-      const status=this.workspace?await this.backend.accountStatus(this.workspace,combined):{state:"signed_out"}
+      const status=await this.connectionIdentity()
       if(status.state!=="signed_in")return {state:"needs_auth",connections:[],...(this.accountPrincipal?{accountPrincipal:this.accountPrincipal}:{})}
       if((this.accountPrincipal&&this.accountPrincipal!==status.accountPrincipal)||(input.accountPrincipal&&input.accountPrincipal!==status.accountPrincipal))throw new LoopError("loop-host/needs-auth","Loop account changed")
       const catalog=await this.backend.modelRuntimeCatalog({accountPrincipal:status.accountPrincipal,workspaceId:this.workspace,sessionId:"host-account"},combined)
@@ -290,7 +295,9 @@ export class NativeHostActions {
       await this.observe("")
       return result
     }
-    const status=await this.backend.accountStatus(this.workspace,combined)
+    // Binding setup needs the live Host session. Each business API verifies its own credential.
+    const status=["beginBind","createProject","completeBind","unbind"].includes(action)
+      ? await this.backend.accountStatus(this.workspace,combined) : await this.connectionIdentity()
     if(status.state!=="signed_in")throw new LoopError("loop-host/needs-auth","Loop sign-in is required")
     if((this.accountPrincipal && this.accountPrincipal!==status.accountPrincipal) || (input.accountPrincipal && input.accountPrincipal!==status.accountPrincipal))throw new LoopError("loop-host/needs-auth","Loop account changed")
     await this.observe(status.accountPrincipal)
@@ -305,7 +312,7 @@ export class NativeHostActions {
     if(action==="beginBind"){
       const binding=await this.backend.syncAction(context,syncOptions,"checkWorkspaceBinding",{workspaceId:input.workspace.workspaceId},combined)
       if(binding&&input.mode!=="switch")return {state:"active",binding,accountPrincipal:status.accountPrincipal}
-      if (status.deviceOnly) return this.connect(combined, undefined, true)
+      if ("deviceOnly" in status && status.deviceOnly) return this.connect(combined, undefined, true)
       const catalog=await this.backend.syncAction(context,syncOptions,"projectSyncCatalog",{},combined)
       const selection={id:randomUUID(),expires:Date.now()+15*60_000,workspace:input.workspace.workspaceId,account:status.accountPrincipal,agent:catalog.agent.agentId,grantId:status.grantId}
       this.selection=selection
@@ -321,11 +328,10 @@ export class NativeHostActions {
       return result
     }
     if(action==="checkWorkspaceBinding")return this.backend.syncAction(context,syncOptions,action,input,combined)
-    if(["agentCatalog","agentSchema","agentAction"].includes(action))await this.backend.syncAction(context,syncOptions,"checkWorkspaceBinding",input,combined)
     if(["openLoopPage","status","refreshProjectSyncMetadata"].includes(action))return this.backend.syncAction(context,syncOptions,action,input,combined)
     if(action.startsWith("collaboration"))return this.backend.collaborationAction(context,this.config.stateHome,action,input,combined,message=>{for(const listener of this.events){try{listener(publicValue(message))}catch{}}})
-    if(action==="skillCatalogWatch")return this.backend.watchCatalog(context,{stateHome:this.config.stateHome,syncHome:this.syncHome??this.config.stateHome,profile:this.config.syncProfile},input,message=>{for(const listener of this.skills){try{listener(message)}catch{}}},combined)
-    if(["knowledgeCatalog","skillCatalog","skillContent"].includes(action))return this.backend.catalogRead(context,{stateHome:this.config.stateHome,syncHome:this.syncHome??this.config.stateHome,profile:this.config.syncProfile},action,input,combined)
+    if(action==="skillCatalogWatch")return this.backend.watchCatalog(context,input,message=>{for(const listener of this.skills){try{listener(message)}catch{}}},combined)
+    if(["knowledgeCatalog","skillCatalog","skillContent"].includes(action))return this.backend.catalogRead(context,action,input,combined)
     if(["projectSyncCatalog","prepareProjectSync","reconcileWorkspaceBinding","setSync","syncStatus","retrySync"].includes(action)){
       if(!this.syncHome)throw new LoopError("loop-host/unavailable","Native sync storage is not configured")
       return this.backend.syncAction(context,{stateHome:this.config.stateHome,syncHome:this.syncHome,profile:this.config.syncProfile},action,input,combined)

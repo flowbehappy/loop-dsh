@@ -248,7 +248,6 @@ export class CollaborationService {
     if(!["dispatch","followup","notify","cancel","review","end-management","inspect","set-subscription","list-subscriptions","read-updates"].includes(input.action) || !input.arguments || typeof input.arguments!=="object" || Array.isArray(input.arguments))throw new LoopError("loop-host/invalid-request","Invalid collaboration action")
     const {namespace,document}=await this.active(input.sessionId,signal)
     if(["set-subscription","list-subscriptions","read-updates"].includes(input.action))return subscriptionAction(this.api,this.store,namespace,document,input,event=>emit({type:"loop-host-collaboration-event",scope:collaborationEventScope(namespace),event}),signal)
-    if(["dispatch","followup","notify"].includes(input.action) && document.binding.status!=="active")throw new LoopError("loop-host/conflict","The original collaboration route is retired")
     const request=parseWire(stringifyWire(input.arguments));delete request.payloadHash
     request.expectedBindingEpoch=integer(document.binding.bindingEpoch)
     if(input.action==="inspect"){

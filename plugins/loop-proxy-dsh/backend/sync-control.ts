@@ -50,16 +50,6 @@ export class SyncControl {
     }
     return record.target
   }
-  async catalogScope(workspace:string,session:string,catalog="skills",signal?:AbortSignal){
-    const {credential,file}=await this.bindingFile(workspace,signal)
-    const record=await file.read()
-    const target=this.checkedTarget(record,credential)
-    const revision=record?"hostbinding:"+hash([target.loopServiceBaseUrl,target.loopWorkspaceId,target.projectId,target.defaultChannelId,target.agentId,record.grantId,record.clientId].map(value=>value??"").join("\0")).slice(0,36):""
-    const scope:any={installationId:this.options.installation,accountId:credential.principal_id,serverBaseUrl:this.options.server,workspaceId:credential.workspace_id,hostWorkspaceId:workspace,sessionId:session,catalog}
-    if(record)Object.assign(scope,{projectId:target.projectId,agentId:target.agentId,bindingRevision:revision})
-    scope.identityFingerprint="skill-scope:"+hash([this.options.server,credential.principal_id,this.options.installation,credential.workspace_id,workspace,target?.projectId??"",target?.agentId??"",revision].join("\0")).slice(0,36)
-    return scope
-  }
   async unbind(input:any,signal?:AbortSignal){
     const {credential,file}=await this.bindingFile(input.workspace?.workspaceId,signal)
     this.checkedTarget(await file.read(),credential)

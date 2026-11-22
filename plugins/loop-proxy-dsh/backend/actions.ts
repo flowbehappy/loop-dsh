@@ -3,7 +3,7 @@ import {LoopError} from "./errors.ts"
 
 export interface Action {id: string; [field: string]: unknown}
 function actionPath(id: string): string {
-  if (!id || id === "." || id === "..") throw new LoopError("loop-host/invalid-request", "Action ID is required")
+  if (typeof id !== "string" || !id || id === "." || id === "..") throw new LoopError("loop-host/invalid-request", "Action ID is required")
   return "/actions/" + encodeURIComponent(id)
 }
 /** Public action protocol, shared by discovery and tool invocation. */

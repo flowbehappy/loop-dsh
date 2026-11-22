@@ -673,19 +673,18 @@ window.__ModuleLoader__.load({
       return { ...humanConnection(value), challengeId: id(value.challengeId, "challengeId") };
     });
     function selectors(value, label, pattern, min) {
-      if (!Array.isArray(value) || value.length < min || value.length > 128 || value.some((item) => typeof item !== "string" || item.length > 255 || !pattern.test(item)) || new Set(value).size !== value.length) fail(`${label} must contain distinct exact identifiers`);
+      if (!Array.isArray(value) || value.length < min || value.length > 128 || value.some((item) => typeof item !== "string" || Buffer.byteLength(item) > 512 || !pattern.test(item)) || new Set(value).size !== value.length) fail(`${label} must contain distinct exact identifiers`);
       return [...value];
     }
     var humanLoginSchema = schema((value) => {
       object(value, "Human delegation request", /* @__PURE__ */ new Set(["connection", "allowedActions", "resourceConstraints", "manage"]));
       const connection = humanConnection(value);
       if (value.manage !== void 0 && typeof value.manage !== "boolean") fail("manage must be a boolean");
-      if (connection.connection === "apps" && value.manage === true) fail("The Apps connection does not allow management scope");
       return {
         ...connection,
         manage: value.manage === true,
         allowedActions: selectors(value.allowedActions, "allowedActions", /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$/u, 1),
-        resourceConstraints: selectors(value.resourceConstraints ?? [], "resourceConstraints", /^[a-z][a-z0-9-]*:[A-Za-z0-9_./-]+$/u, 0)
+        resourceConstraints: selectors(value.resourceConstraints ?? [], "resourceConstraints", /^[a-z][a-z0-9-]*:[^,:*?\x00-\x1f\x7f]+$/u, 0)
       };
     });
     var syncPreferencesSchema = schema((value) => {
@@ -1997,7 +1996,6 @@ window.__ModuleLoader__.load({
       runtime,
       t
     }) {
-      const selectedBoard = state.boards.find((board) => board.boardId === state.selectedBoardId);
       const presentation = boardPickerPresentation(state);
       return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", { className: loop_ui_default.hint, children: t("collab.dialog.bindBody") }),
@@ -2052,7 +2050,7 @@ window.__ModuleLoader__.load({
             {
               size: "sm",
               variant: "primary",
-              disabled: presentation !== "choices" || state.busy !== null || state.selectedBoardId === "" || selectedBoard?.capability.available === false,
+              disabled: presentation !== "choices" || state.busy !== null || state.selectedBoardId === "",
               onClick: () => {
                 void runtime.bindBoard(state.selectedBoardId);
               },
@@ -2615,15 +2613,6 @@ window.__ModuleLoader__.load({
         const board = state.boards.find((item) => item.boardId === boardId);
         if (board === void 0 || state.boardsRevision === "") {
           this.patch({ error: { code: "loop-collaboration/not-bound", message: "Choose a Loop board first." } });
-          return;
-        }
-        if (!board.capability.available) {
-          this.patch({
-            error: {
-              code: "loop-collaboration/capability-unsupported",
-              message: board.capability.reason ?? ""
-            }
-          });
           return;
         }
         if (this.options.remote.collaborationBind === void 0) {

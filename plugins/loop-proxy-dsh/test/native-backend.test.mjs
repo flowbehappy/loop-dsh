@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp, rm, stat} from 'node:fs/promises'
+import {mkdtemp, readFile, rm, stat} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {createServer} from 'node:http'
 import {once} from 'node:events'
@@ -38,6 +38,49 @@ async function fixture(t, handler = (_req, res) => res.end('{}')) {
     access_expires_at: new Date(Date.now() + 3600_000).toISOString()}
   return {root, base, store, credentials, value, provider: contexts[0].get('credentials')}
 }
+test('every action uses its own invocation endpoint and live server decision', async t => {
+  const {NativeHostActions}=await import('../backend/adapter.ts')
+  const {LoopHostRuntime}=await import('../host-runtime.mjs')
+  const {BindingStore}=await import('../binding-store.mjs')
+  const names=new Set(['task.list','channel.list','message.history','project.list','drive.list','dashboard.list','app.catalog',
+    'skill.catalog','workflow.get','schedule.list','memory.get','machine.list','future.unknown-action'])
+  if(process.env.LOOP_SOURCE_ROOT){
+    const catalog=JSON.parse(await readFile(process.env.LOOP_SOURCE_ROOT+'/internal/actioncontract/default_actions.json','utf8'))
+    for(const action of catalog)names.add(action.id)
+  }
+  let grant=true
+  const calls=[]
+  const f=await fixture(t, async(req,res)=>{
+    const id=req.url.match(/^\/api\/v1\/workspaces\/workspace\/external\/agent\/actions\/([^/]+)\/invocations$/u)?.[1]
+    if(!id || req.method!=='POST'){res.writeHead(403).end();return}
+    let body='';for await(const chunk of req)body+=chunk
+    calls.push({id,args:JSON.parse(body)})
+    res.writeHead(grant?200:403,{'Content-Type':'application/json'}).end(JSON.stringify(grant?
+      {data:{id}}:{error:{code:'resource_not_granted',message:'Decision from Loop'}}))
+  })
+  await f.credentials.publish({...f.value,scope:'offline_access'})
+  const adapter=new NativeHostActions({stateHome:f.root+'/host',serviceBaseUrl:f.base,loopWorkspaceId:'workspace',
+    installationId:'installation',pageOrigin:f.base,syncProfile:'test',accountPrincipal:'principal'},{provider:f.provider})
+  t.after(()=>adapter.dispose())
+  const store=new BindingStore({root:f.root+'/routes',installationId:'installation',defaultServiceBaseUrl:f.base})
+  const workspace={id:'local',path:f.root,sessionIds:['session']}
+  const actions=Object.fromEntries(['agentSchema','agentCatalog','agentAction'].map(name=>[name,(input,signal)=>adapter.request(name,input,signal)]))
+  const runtime=new LoopHostRuntime({store,actions,accountPrincipal:'principal',workspaces:{get:()=>workspace,list:()=>[workspace]},
+    sessions:{get:()=>({header:{createdAt:1}})}})
+  runtime.serviceBaseUrl=f.base
+  runtime.loopWorkspaceId='workspace'
+  for(const id of names){
+    const input={target:'requested-by-user'}
+    const command={verb:'call',name:id,input:JSON.stringify(input)}
+    grant=true
+    assert.equal((await runtime.agentCommand('session',command)).failed,false,id)
+    grant=false
+    await assert.rejects(runtime.agentCommand('session',command),{code:'resource_not_granted',status:403})
+    assert.deepEqual(calls.splice(0),[{id,args:input},{id,args:input}])
+  }
+  t.diagnostic(names.size+' action IDs exercised against allow and deny responses')
+})
+
 test('project binding uses server access decisions independent of role labels and service failures', async t => {
   const {SyncControl} = await import('../backend/sync-control.ts')
   const {HostAPI} = await import('../backend/host-api.ts')
@@ -111,8 +154,9 @@ test('binding recovery verifies the original channel, restores actions and fence
   const reconcile=(extra={})=>adapter.request('reconcileWorkspaceBinding',{workspace:{workspaceId:'local'},expectedTarget:target,agentId:'agent',accountPrincipal:'principal',confirm:false,...extra})
   await assert.rejects(reconcile(),/binding is missing/)
   await file.write(legacy)
-  for(const action of ['agentCatalog','agentSchema','agentAction'])await assert.rejects(adapter.request(action,discovery),/Legacy Workspace binding needs verification/)
-  assert.equal(business,0)
+  for(const action of ['agentCatalog','agentSchema','agentAction'])await adapter.request(action,discovery)
+  assert.equal(business,3)
+  assert.deepEqual(JSON.parse(JSON.stringify(await file.read())),legacy)
   for(const invalid of [{clientId:'foreign'},{clientId:'client'},{revocation:{startedAt:'pending'}},{target:{...target,loopWorkspaceId:'other'}},{target:{...target,loopServiceBaseUrl:'https://other.example'}},{target:{...target,defaultChannelId:'other'}}]){
     const record={...legacy,...invalid};await file.write(record)
     await assert.rejects(reconcile(),{code:'loop-host/conflict'})
@@ -137,7 +181,7 @@ test('binding recovery verifies the original channel, restores actions and fence
   assert.deepEqual(await reconcile(),{changed:false,owned:true})
   assert.equal(ensures,ensureCount,'healthy bindings do not call the remote ensure operation')
   assert.deepEqual(await adapter.request('agentCatalog',discovery),{actions:['task.get']})
-  assert.equal((await adapter.request('agentSchema',discovery)).id,'task.get');assert.equal(business,2)
+  assert.equal((await adapter.request('agentSchema',discovery)).id,'task.get');assert.equal(business,5)
   for(const record of [undefined, {...legacy,clientId:'old-client'}, {...legacy,grantId:'grant'}]){
     if(record)await file.write(record)
     else await file.remove(()=>true)
@@ -167,11 +211,12 @@ test('binding recovery verifies the original channel, restores actions and fence
   const runtime=new LoopHostRuntime({store,actions,accountPrincipal:'principal',defaultServiceBaseUrl:f.base,
     workspaces:{list:()=>[local],get:()=>local},sessions:{get:()=>({id:'persisted',header:{createdAt:1}})}})
   await runtime.waitForActions()
+  await runtime.backgroundProjectSync()
   await file.write({...legacy,clientId:'previous-client'})
   const command=()=>runtime.agentCommand('persisted',{verb:'schema',name:'channel.members'})
-  // Normal actions detect a stale owner and resume on the verified channel.
+  // Business discovery does not repair or require the legacy upload owner.
   assert.equal((await command()).failed,false)
-  assert.equal((await file.read()).clientId,'client')
+  assert.equal((await file.read()).clientId,'previous-client')
   // A lifecycle sync also repairs a missing native record without a dialog.
   await file.remove(()=>true)
   const automatic=await runtime.syncProjects({},undefined,{background:true})

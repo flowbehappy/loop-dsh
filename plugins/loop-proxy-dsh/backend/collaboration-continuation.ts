@@ -70,7 +70,7 @@ export class CollaborationContinuation {
       const requested=input.arguments.target
       if(continuation.references.some((target:any)=>target.targetId===requested?.targetId && target.targetType===requested.kind))task={taskId:"",targetIds:continuation.references.map((target:any)=>target.targetId),targetTypes:Object.fromEntries(continuation.references.map((target:any)=>[target.targetId,target.targetType])),allowedActions:actions(continuation.references),intentRef:continuation.referenceIntentRef}
     }
-    if(!task?.targetIds.length || !task.allowedActions.includes(input.action) || task.taskId && !continuation.authorizedTaskIds?.includes(task.taskId))conflict("Choose the intended Task in a new accepted submission before continuing")
+    if(!task?.targetIds.length || task.taskId && !continuation.authorizedTaskIds?.includes(task.taskId))conflict("Choose the intended Task in a new accepted submission before continuing")
     const original=document.intents[task.intentRef]
     if(!original)conflict("Original Task source is unavailable")
     if(continuation.userIntentId){

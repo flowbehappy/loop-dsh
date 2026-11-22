@@ -7,7 +7,7 @@ export type HostArea = "models" | "account" | "sync" | "workspace"
 /** Fixed public Host protocol roots, never a caller-supplied credential target. */
 export function hostRoot(credential: Credential, area: HostArea): string {
   const ending = `/api/v1/workspaces/${encodeURIComponent(credential.workspace_id)}/external/agent`
-  if (!credential.resource.endsWith(ending) || !credential.scope.split(/\s+/u).includes("loop.host")) {
+  if (!credential.resource.endsWith(ending)) {
     throw new LoopError("loop-host/needs-auth", "A Loop Host connection is required")
   }
   const base = credential.resource.slice(0, -ending.length)

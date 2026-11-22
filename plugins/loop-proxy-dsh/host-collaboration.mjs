@@ -289,13 +289,17 @@ export function createCollaborationReceiptProjection() {
     key: "loopCollaborationReceipts",
     stateSchema: receiptSchema,
     // Replay old checkpoints to recover local input identities in the inbox.
-    stateVersion: 3,
+    stateVersion: 4,
     init() {
       return {entries: {}}
     },
     apply(state, event) {
       if (event.type === "turn/end" && state.claimedInputs?.length) return {...state, claimedInputs: []}
+      if (event.type === "user/message" && event.data?.source?.kind === "user" && event.data.source.rpcId) {
+        return {...state, feedback: false}
+      }
       if (event.type === "user/message" && event.data?.source?.kind === SOURCE_KIND) {
+        state = {...state, feedback: true}
         const source = event.data.source
         const entry = state.entries[source.deliveryId]
         if (entry === undefined) return state
@@ -328,8 +332,12 @@ export function createCollaborationReceiptProjection() {
       if (removed === 0 && inserted.length === 0) return state
       const entries = {...state.entries}
       const claimedInputs = [...(state.claimedInputs ?? [])]
+      let feedback = state.feedback
       for (const message of previous.slice(splice.start, splice.start + removed)) {
-        if (message?.requestId && splice.outcome !== "canceled") claimedInputs.push({...message, seq: event.seq})
+        if (splice.outcome !== "canceled") {
+          if (message?.requestId) { claimedInputs.push({...message, seq: event.seq}); feedback = false }
+          else if (loopDelivery(message)) feedback = true
+        }
         const source = loopDelivery(message)
         if (source === undefined) continue
         entries[source.deliveryId] = {
@@ -347,7 +355,7 @@ export function createCollaborationReceiptProjection() {
           sessionSeq: event.seq,
         }
       }
-      return {...state, entries, claimedInputs, [queue]: previous.toSpliced(splice.start, removed, ...inserted)}
+      return {...state, entries, claimedInputs, feedback, [queue]: previous.toSpliced(splice.start, removed, ...inserted)}
     },
   }
 }
@@ -825,16 +833,12 @@ export class LoopCollaborationRuntime {
         const matches = (directory?.entries ?? []).filter(entry => entry.targetId === targetId)
         const entry = matches[0]
         if (matches.length !== 1 || !["agent", "human"].includes(entry?.targetType) ||
-            entry.visible !== true || !entry.memberId ||
+            !entry.memberId ||
             (entry.targetType === "agent" && entry.agentId === context.agent?.id)) {
-          throw failure("loop-collaboration/invalid-request", "Each collaborator must be an accessible, assignable directory identity other than the current assistant")
+          throw failure("loop-collaboration/invalid-request", "Each collaborator must be an exact directory identity other than the current assistant")
         }
         targets.push({targetId, targetType: entry.targetType, memberId: entry.memberId,
-          agentId: text(entry.agentId, 200), mention: text(entry.mention, 512), needsAccess: entry.needsAccess === true, capability: entry.capability ?? {}, displayName: text(entry.displayName, 512), intendedActions: ["dispatch", "followup", "cancel", "review", "end-management"]})
-      }
-      if (targets.some(target => target.needsAccess || !(target.capability.delegable || target.capability.assignable))) {
-        return {state: "needs-access", targets, channelId: context.defaultChannelId,
-          nextStep: "These exact directory identities lack execution or assignment access. Resolve the stated access with the authorizing human; a channel invitation alone does not grant execution. No intent, invitation or Task was created."}
+          agentId: text(entry.agentId, 200), mention: text(entry.mention, 512), displayName: text(entry.displayName, 512), intendedActions: ["dispatch", "followup", "cancel", "review", "end-management"]})
       }
       let status = await this.call("collaborationStatus", {sessionId}, signal)
       // From here bind or activation may have committed even on an error.
@@ -1443,6 +1447,12 @@ export class LoopCollaborationRuntime {
       this.activating.delete(key)
       this.resolveIntentActivation(`${binding.sessionId}\0${binding.requestId}`)
     }
+  }
+
+  isFeedbackTurn(sessionId) {
+    if (this.currentUserInputs.has(sessionId)) return false
+    const session = this.sessions.get(sessionId)
+    return session && this.ctx.sessionProjections.stateOf(session, "loopCollaborationReceipts")?.feedback === true
   }
 
   async authorizeAgentCall(sessionId, command, schema, signal) {
@@ -2112,9 +2122,8 @@ export class LoopCollaborationRuntime {
         const directory = await runtime.directory({sessionId: sessionId(exec), query: task.assignee, limit: MAX_DIRECTORY_LIMIT}, exec.signal)
         const entries = (directory?.entries ?? []).filter(entry => entry?.memberId === task.assignee)
         if (entries.length !== 1 || !["human", "agent"].includes(entries[0].targetType) ||
-            !entries[0].targetId || entries[0].needsAccess ||
-            !(entries[0].capability?.assignable || entries[0].capability?.delegable)) {
-          throw failure("loop-collaboration/invalid-request", "assignee must be an exact directory member with Task assignment access; no Task was created")
+            !entries[0].targetId) {
+          throw failure("loop-collaboration/invalid-request", "assignee must identify one exact directory member; no Task was created")
         }
         const target = entries[0]
         return await runtime.runAction("dispatch", sessionId(exec), {

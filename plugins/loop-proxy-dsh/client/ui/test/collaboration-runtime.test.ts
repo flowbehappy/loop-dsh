@@ -1027,7 +1027,7 @@ test('binding ignores a stale pre-bind status response and keeps the confirmed s
   assert.equal(runtime.store.getSnapshot().shareScope.expandedAudience, true)
 })
 
-test('an unavailable board is shown but cannot be bound', async () => {
+test('binding a board uses Loop’s decision even when the picker shows unavailable', async () => {
   let binds = 0
   const h = harness({
     collaborationBoards: async () => ({
@@ -1051,15 +1051,15 @@ test('an unavailable board is shown but cannot be bound', async () => {
     }),
     collaborationBind: async () => {
       binds += 1
-      throw new Error('must not bind')
+      return { ok: false, error: { code: 'loop-collaboration/permission-denied', message: 'Denied by Loop' } }
     },
   })
   const runtime = h.runtime.forSession(sessionId)
   await runtime.loadBoards()
   await runtime.bindBoard('brd_unavailable')
 
-  assert.equal(binds, 0)
-  assert.equal(runtime.store.getSnapshot().error?.code, 'loop-collaboration/capability-unsupported')
+  assert.equal(binds, 1)
+  assert.equal(runtime.store.getSnapshot().error?.code, 'loop-collaboration/permission-denied')
 })
 
 test('unbound v4 project binding can load and bind the Host-mapped server board shape', async () => {

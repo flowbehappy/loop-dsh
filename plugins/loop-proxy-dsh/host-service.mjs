@@ -79,7 +79,8 @@ export default class LoopHostService extends TypertRemoteService {
     ctx.effect(() => this.runtime.addSessionInvalidationListener(ids => {
       for (const id of ids) this.collaboration.clearSessionActivation(id)
     }), "loop-proxy-dsh-host: invalidate collaboration intents")
-    this.runtime.authorizeAgentCall = (...args) => this.collaboration.authorizeAgentCall(...args)
+    this.runtime.feedbackGuard = id => this.collaboration.isFeedbackTurn(id)
+      ? this.collaboration.authorizeAgentCall.bind(this.collaboration) : undefined
     this.skills = new LoopSkillRuntime(ctx, {
       getActions: () => this.ctx.get("loopHostActions"),
     })

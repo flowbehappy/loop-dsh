@@ -10,9 +10,6 @@ const ttl=300_000
 export type HumanSlot="business"|"apps"
 export type HumanConsent={allowedActions:string[];resourceConstraints:string[];scope:string}
 export type CallbackBroker={registerCallback(handler:RequestListener):{url:string;dispose():void}}
-const app=/^app:([a-zA-Z0-9][a-zA-Z0-9_-]{0,127})$/u
-const appAction=/^app-action:([a-zA-Z0-9][a-zA-Z0-9_-]{0,127})\/[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/u
-export const appActions=new Set(["app.catalog","app.invoke"])
 export function humanSlot(value:unknown):HumanSlot {
   if(value===undefined || value==="business")return "business"
   if(value==="apps")return value
@@ -22,17 +19,10 @@ function list(value:unknown,format:RegExp,limit:number):string[] {
   if(!Array.isArray(value) || value.length>limit || value.some(item=>typeof item!=="string" || !format.test(item)))throw new LoopError("loop-host/invalid-request","Invalid Human authorization parameters")
   return [...new Set<string>(value)].sort()
 }
-export function humanConsent(input:any,slot:HumanSlot):HumanConsent {
+export function humanConsent(input:any):HumanConsent {
   const allowedActions=list(input.allowedActions,/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/u,100)
-  const resourceConstraints=list(input.resourceConstraints===undefined?[]:input.resourceConstraints,/^[a-z][a-z-]*:[^,\x00-\x1f\x7f:*?]{1,500}$/u,128)
-  if(!allowedActions.length || (input.manage!==undefined && typeof input.manage!=="boolean") ||
-    allowedActions.some(action=>appActions.has(action)!==(slot==="apps")))throw new LoopError("loop-host/invalid-request","Choose actions for the selected Human connection")
-  if(slot==="apps"){
-    const apps=new Set(resourceConstraints.flatMap(item=>{const name=app.exec(item)?.[1];return name?[name]:[]}))
-    const targets=new Set(resourceConstraints.flatMap(item=>{const name=appAction.exec(item)?.[1];return name?[name]:[]}))
-    if(input.manage || resourceConstraints.some(item=>!app.test(item)&&!appAction.test(item)) || !apps.size || [...targets].some(name=>!apps.has(name)) ||
-      (allowedActions.includes("app.invoke") && [...apps].some(name=>!targets.has(name))))throw new LoopError("loop-host/invalid-request","Choose exact App and App Action resource locators")
-  }
+  const resourceConstraints=list(input.resourceConstraints===undefined?[]:input.resourceConstraints,/^[a-z][a-z0-9-]*:[^,\x00-\x1f\x7f:*?]{1,510}$/u,128)
+  if(!allowedActions.length || (input.manage!==undefined && typeof input.manage!=="boolean"))throw new LoopError("loop-host/invalid-request","Invalid Human consent request")
   return {allowedActions,resourceConstraints,scope:"loop.human_access"+(input.write===false && !input.manage?"":" loop.human_write")+(input.manage?" loop.human_manage":"")+" offline_access"}
 }
 export function sameScope(a:unknown,b:string):boolean {

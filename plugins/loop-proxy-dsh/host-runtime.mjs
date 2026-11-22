@@ -1527,24 +1527,39 @@ export class LoopHostRuntime {
     })
   }
 
-  async humanTaskWorkspace(sessionId, signal) {
-    const {workspace, context, unboundConnection} = await this.ensureSessionContextLocked(sessionId, signal, {prepareMissing:false})
-    if (context.state !== "inherited" && !unboundConnection) {
-      throw failure("loop-host/conflict", context.reason ?? "The Session's original connection is unavailable")
+  // Business APIs carry explicit resource IDs. Only the original connection
+  // matters here. Upload settings and the conversation channel belong to sync.
+  async businessWorkspace(sessionId) {
+    await this.requireAccount()
+    const workspace = await this.workspaceForSession(sessionId)
+    if (!workspace) throw failure("loop-host/session-unavailable", "The Session does not belong to a registered Workspace")
+    const {session, associated} = await this.sessionWorkspace(workspace.id, sessionId)
+    if (!associated || !session) throw failure("loop-host/session-unavailable", "The Session does not belong to this Workspace")
+    if (this.loopWorkspaceId && await this.store.accountDisconnectPending(this.accountPrincipal, this.serviceBaseUrl, this.loopWorkspaceId)) {
+      throw failure("loop-host/needs-auth", "Loop disconnect is pending")
     }
-    return workspace
+    const conflict = () => failure("loop-host/conflict", "This Session keeps its original Loop connection")
+    const record = await this.store.getSession(this.accountPrincipal, workspace.id, sessionId)
+    if (!record && await this.store.getSessionForWorkspaceAnyAccount(workspace.id, sessionId)) throw conflict()
+    const binding = record?.legacyBinding ?? await this.store.getBinding(this.accountPrincipal, workspace.id, workspace.path, this.serviceBaseUrl)
+    if (!record && !binding && await this.store.getBindingForWorkspace(this.accountPrincipal, workspace.id, workspace.path)) throw conflict()
+    if (record && (!record.loopServiceBaseUrl || this.serviceBaseUrl && record.loopServiceBaseUrl !== this.serviceBaseUrl)) throw conflict()
+    const originalWorkspace = record?.loopWorkspaceId ?? binding?.loopWorkspaceId
+    if (this.loopWorkspaceId && (originalWorkspace && originalWorkspace !== this.loopWorkspaceId ||
+        record && !record.loopWorkspaceId && (!binding || ![record.bindingRevision, record.actionRevision].includes(binding.revision)))) throw conflict()
+    return {workspace, loopWorkspaceId: this.loopWorkspaceId || originalWorkspace}
   }
 
   humanTaskOwner(sessionId, signal) {
     return this.withConnectionLease(signal, async () => {
-      await this.humanTaskWorkspace(sessionId, signal)
+      await this.businessWorkspace(sessionId)
       return {serviceBaseUrl:this.serviceBaseUrl, accountPrincipal:this.accountPrincipal, loopWorkspaceId:this.loopWorkspaceId || undefined}
     })
   }
 
   async humanCommand(sessionId, command, signal, hasCurrentUserInput, taskGrant) {
     return await this.withConnectionLease(signal, async () => {
-      const workspace = await this.humanTaskWorkspace(sessionId, signal)
+      const {workspace} = await this.businessWorkspace(sessionId)
       const {connection, verb, name, input} = command
       if (command.principal !== "human" || !["business", "apps"].includes(connection)) {
         throw failure("loop-host/invalid-request", "Select the Human business or Apps connection explicitly")
@@ -1602,7 +1617,7 @@ export class LoopHostRuntime {
 
   // Reuse the normal local-workspace mapping on demand. Never move a saved
   // Session to another project/account/server, or enable historical uploads.
-  async ensureSessionContextLocked(sessionId, signal, {prepareMissing = true} = {}) {
+  async ensureSessionContextLocked(sessionId, signal) {
     await this.requireAccount()
     const workspace = await this.workspaceForSession(sessionId)
     if (workspace === undefined) throw failure("loop-host/session-unavailable", "The Session does not belong to a registered Workspace")
@@ -1651,7 +1666,6 @@ export class LoopHostRuntime {
     }, signal)) {
       throw failure("loop-host/conflict", "The Host workspace mapping is missing. Refresh Workspace sync before using this Session")
     }
-    if (!prepareMissing) return {workspace, context, unboundConnection: true}
     if (!this.serviceBaseUrl || !this.loopWorkspaceId ||
         !this.actions?.projectSyncCatalog || !this.actions?.prepareProjectSync) {
       throw failure("loop-host/not-bound", context.reason)
@@ -1690,12 +1704,9 @@ export class LoopHostRuntime {
     if (!this.canUseAgentActions()) {
       throw failure("loop-host/backend-unavailable", "Loop Agent actions are unavailable")
     }
-    const discovery = command.verb === "actions" || command.verb === "schema"
-    const {workspace, context, unboundConnection} = await this.ensureSessionContextLocked(sessionId, signal, {prepareMissing: command.verb === "context"})
-    if (context.state !== "inherited" && !(unboundConnection && (discovery || command.verb === "call"))) {
-      throw failure("loop-host/conflict", context.reason ?? "The Session is not bound to a Loop Project")
-    }
     if (command.verb === "context") {
+      const {context} = await this.ensureSessionContextLocked(sessionId, signal)
+      if (context.state !== "inherited") throw failure("loop-host/conflict", context.reason)
       if (command.name || command.input) throw failure("loop-host/invalid-request", "Loop context accepts no arguments")
       return {failed: false, output: boundedJSON({
         projectId: context.projectId, defaultChannelId: context.defaultChannelId,
@@ -1703,6 +1714,7 @@ export class LoopHostRuntime {
         binding: {source: "saved", resourceAccess: "not_checked"},
       })}
     }
+    const {workspace, loopWorkspaceId} = await this.businessWorkspace(sessionId)
     const preparation = prepareDelegation ? {prepareDelegation:true,
       ...(command.verb === "call" ? {delegationArguments:JSON.parse(command.input)} : {})} : {}
     const permissionResult = ({error,delegation}) => command.verb === "call"
@@ -1727,10 +1739,7 @@ export class LoopHostRuntime {
             workspaceId: workspace.id, sessionId, accountPrincipal: this.accountPrincipal, name: command.name, ...preparation,
           }, signal)
           if (descriptor?.delegation) return permissionResult(descriptor)
-          const recovery = descriptor?.error?.code === "action_not_granted" && command.name === "channel.agent-add"
-            ? {recovery: "In Loop, open /settings/account → Personal Assistant (个人助手) → Edit permissions (编辑权限) → Channels (频道) → Manage access (管理授权). Ask the authorizing human to enable this permission; existing saved settings are preserved. Channel and Agent access checks still apply."}
-            : {}
-          return {failed: Boolean(descriptor?.error), output: boundedJSON({...descriptor, ...recovery})}
+          return {failed: Boolean(descriptor?.error), output: boundedJSON(descriptor)}
         }
         return {failed: false, output: boundedJSON({actions: [],
           hint: "No authorized actions match this prefix. This does not prove an action is unsupported; use schema <exact-action-id> for its specific availability or authorization result."})}
@@ -1753,7 +1762,8 @@ export class LoopHostRuntime {
       return {failed: Boolean(result?.error), output: boundedJSON(result)}
     }
     if (command.verb === "call") {
-      if (this.authorizeAgentCall || command.implicitEmptyInput) {
+      const guard = this.feedbackGuard?.(sessionId)
+      if (guard || command.implicitEmptyInput) {
         const schema = await this.actions.agentSchema({workspaceId: workspace.id, sessionId, accountPrincipal: this.accountPrincipal, name: command.name, ...preparation}, signal)
         if (command.implicitEmptyInput) {
           if (schema?.error && !schema.delegation) return {failed:true, output:boundedJSON({error:schema.error})}
@@ -1761,7 +1771,7 @@ export class LoopHostRuntime {
             return {failed:true, output:boundedJSON({error:{code:"invalid_command", message:"This action requires explicit JSON arguments.", hint:"Read the action schema, then pass one JSON object.", dispatched:false}})}
           }
         }
-        if (this.authorizeAgentCall) await this.authorizeAgentCall(sessionId, command, schema, signal)
+        if (guard) await guard(sessionId, command, schema, signal)
         if (schema?.delegation) return permissionResult(schema)
       }
       const result = await this.actions.agentAction({
@@ -1775,7 +1785,7 @@ export class LoopHostRuntime {
       if (result === null || typeof result !== "object" || (!Object.hasOwn(result, "data") && !result.error)) {
         throw failure("loop-host/backend-invalid", "Loop Agent action result is invalid")
       }
-      const webUrl = !result.error && resultWebUrl(command.name, result.data?.data, this.serviceBaseUrl, context.loopWorkspaceId)
+      const webUrl = !result.error && resultWebUrl(command.name, result.data?.data, this.serviceBaseUrl, loopWorkspaceId)
       return {
         failed: Boolean(result.error),
         output: boundedJSON(webUrl ? {...result, webUrl} : result),

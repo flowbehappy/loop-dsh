@@ -394,7 +394,14 @@ export class LoopBackend {
     })
     this.worksiteQueue=operation.catch(()=>{});return operation
   }
-  watchCatalog(context:ActionContext,options:Omit<SyncOptions,"installation"|"server">,input:any,emit:(value:any)=>void,signal?:AbortSignal):Promise<any>{
+  private catalogScope(credential:Credential,workspace:string,session:string,catalog:string){
+    const {server,installation}=this.options
+    const identity=[server,installation,credential.workspace_id,credential.principal_id,credential.grant_id,credential.client_id,workspace]
+    return {installationId:installation,accountId:credential.principal_id,serverBaseUrl:server,workspaceId:credential.workspace_id,
+      hostWorkspaceId:workspace,sessionId:session,catalog,identityFingerprint:"skill-scope:"+createHash("sha256").update(JSON.stringify(identity)).digest("hex").slice(0,36)}
+  }
+
+  watchCatalog(context:ActionContext,input:any,emit:(value:any)=>void,signal?:AbortSignal):Promise<any>{
     const combined=this.active(signal)
     const previous=this.watchQueue
     const operation=this.track(async()=>{
@@ -409,8 +416,7 @@ export class LoopBackend {
       await old?.watch.dispose()
       requireActive(combined)
       const tokens=new TokenManager(this.store(context.workspaceId),credential,{fetch:this.options.fetch})
-      const sync=new SyncControl(new HostAPI(tokens,this.options.fetch),{...options,installation:this.options.installation,server:this.options.server})
-      const watch=new CatalogWatch(tokens,()=>sync.catalogScope(input.workspaceId,"","skills",this.control.signal),emit,this.control.signal)
+      const watch=new CatalogWatch(tokens,async()=>this.catalogScope(await tokens.credential(this.control.signal),input.workspaceId,"","skills"),emit,this.control.signal)
       if(this.watches.size>=64){await watch.dispose();throw new LoopError("loop-host/unavailable","Too many catalog watches")}
       this.watches.set(key,{generation:credential.generation,watch})
       return {watching:true}
@@ -418,15 +424,13 @@ export class LoopBackend {
     this.watchQueue=operation.catch(()=>{})
     return operation
   }
-  catalogRead(context:ActionContext,options:Omit<SyncOptions,"installation"|"server">,action:string,input:any,signal?:AbortSignal):Promise<any>{
+  catalogRead(context:ActionContext,action:string,input:any,signal?:AbortSignal):Promise<any>{
     const combined=this.active(signal)
     return this.track(async()=>{
       const names:Record<string,string>={skillCatalog:"skill.catalog",skillContent:"skill.content",knowledgeCatalog:"kb.catalog"}
       if(!names[action] || !input.workspaceId || !input.sessionId)throw new LoopError("loop-host/invalid-request","Invalid catalog request")
       const credential=await this.credential(context,combined)
-      const api=new HostAPI(new TokenManager(this.store(context.workspaceId),credential,{fetch:this.options.fetch}),this.options.fetch)
-      const sync=new SyncControl(api,{...options,installation:this.options.installation,server:this.options.server})
-      const scope=await sync.catalogScope(input.workspaceId,input.sessionId,action==="knowledgeCatalog"?"knowledge":"skills",combined)
+      const scope=this.catalogScope(credential,input.workspaceId,input.sessionId,action==="knowledgeCatalog"?"knowledge":"skills")
       const fields=action==="skillContent"?["skillId","path","expectedVersionId","expectedCommitSha","offset","maxBytes"]:action==="knowledgeCatalog"?["kbId","cursor"]:["query","cursor","limit"]
       const args=Object.fromEntries(fields.filter(key=>input[key]!==undefined && input[key]!=="").map(key=>[key,input[key]]))
       const result=await this.invoke(context,names[action],args,combined)

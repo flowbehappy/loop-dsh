@@ -605,7 +605,7 @@ export const humanChallengeSchema = schema(value => {
 
 function selectors(value, label, pattern, min) {
   if (!Array.isArray(value) || value.length < min || value.length > 128 ||
-      value.some(item => typeof item !== "string" || item.length > 255 || !pattern.test(item)) ||
+      value.some(item => typeof item !== "string" || Buffer.byteLength(item) > 512 || !pattern.test(item)) ||
       new Set(value).size !== value.length) fail(`${label} must contain distinct exact identifiers`)
   return [...value]
 }
@@ -614,10 +614,9 @@ export const humanLoginSchema = schema(value => {
   object(value, "Human delegation request", new Set(["connection", "allowedActions", "resourceConstraints", "manage"]))
   const connection = humanConnection(value)
   if (value.manage !== undefined && typeof value.manage !== "boolean") fail("manage must be a boolean")
-  if (connection.connection === "apps" && value.manage === true) fail("The Apps connection does not allow management scope")
   return {...connection, manage: value.manage === true,
     allowedActions: selectors(value.allowedActions, "allowedActions", /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$/u, 1),
-    resourceConstraints: selectors(value.resourceConstraints ?? [], "resourceConstraints", /^[a-z][a-z0-9-]*:[A-Za-z0-9_./-]+$/u, 0)}
+    resourceConstraints: selectors(value.resourceConstraints ?? [], "resourceConstraints", /^[a-z][a-z0-9-]*:[^,:*?\x00-\x1f\x7f]+$/u, 0)}
 })
 
 export const syncPreferencesSchema = schema(value => {

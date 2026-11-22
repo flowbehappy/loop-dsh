@@ -466,7 +466,6 @@ function Boards({
   readonly runtime: CollaborationSessionRuntime
   readonly t: CollaborationDockProps['t']
 }): ReactNode {
-  const selectedBoard = state.boards.find(board => board.boardId === state.selectedBoardId)
   const presentation = boardPickerPresentation(state)
   return (
     <>
@@ -532,8 +531,7 @@ function Boards({
           disabled={
             presentation !== 'choices' ||
             state.busy !== null ||
-            state.selectedBoardId === '' ||
-            selectedBoard?.capability.available === false
+            state.selectedBoardId === ''
           }
           onClick={() => { void runtime.bindBoard(state.selectedBoardId) }}
         >

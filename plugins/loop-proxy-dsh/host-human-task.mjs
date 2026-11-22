@@ -31,7 +31,6 @@ function taskPolicy(command) {
   if ((policy.resourceConstraints.length === 0) !== (input.workspaceWide === true)) {
     throw refusal("Specify exact resource locators, or explicitly request workspaceWide for an action covering all accessible resources.")
   }
-  if ((policy.connection === "apps") !== ["app.catalog","app.invoke"].includes(command.name)) throw refusal("Choose the connection for this action.")
   policy.resourceConstraints.sort()
   const policyKey = createHash("sha256").update(JSON.stringify(policy)).digest("hex")
   return {policy,policyKey,summary:input.summary.trim()}
@@ -86,7 +85,7 @@ export class HumanTaskConsent {
     if (this.current(sessionId) !== message || !this.canOffer(message)) throw refusal("The originating user request changed.")
     const {action, resourceConstraints, manage, write, workspaceWide} = preview
     const summary = (typeof description === "string" && description.trim()) || preview.summary || action
-    const command = {name:action, connection:["app.catalog","app.invoke"].includes(action) ? "apps" : "business",
+    const command = {name:action, connection:action.startsWith("app.") ? "apps" : "business",
       input:JSON.stringify({summary:summary.slice(0,400),resourceConstraints,manage,write,workspaceWide})}
     const policy = taskPolicy(command)
     let history = this.offers.get(message)
@@ -190,8 +189,7 @@ export class HumanTaskConsent {
   forCommand(sessionId,command) {
     const message = this.current(sessionId)
     const grant = message && this.approved.get(message)
-    if (!grant || command.connection !== grant.policy.connection ||
-        (command.verb !== "actions" && !grant.policy.allowedActions.includes(command.name))) {
+    if (!grant || command.connection !== grant.policy.connection) {
       throw refusal("Use the assistant for ordinary work. Explicit personal tasks must first authorize the exact action from this user turn.")
     }
     return {message,grant}

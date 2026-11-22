@@ -1230,6 +1230,7 @@ export class BindingStore {
         workspacePath: input.binding.workspacePath,
         bindingRevision: input.binding.revision,
         loopServiceBaseUrl: input.binding.loopServiceBaseUrl,
+        loopWorkspaceId: input.binding.loopWorkspaceId,
         placementKind: input.binding.placementKind,
         projectId: input.binding.projectId,
         defaultChannelId: input.binding.defaultChannelId,

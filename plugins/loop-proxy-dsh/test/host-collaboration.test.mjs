@@ -270,25 +270,22 @@ test("natural-language selection recovers a stale route for the same account and
   }
 })
 
-test("natural-language preparation rejects inaccessible targets and the assistant itself", async () => {
-  for (const entry of [undefined, {targetId: "wrong"},
-    {needsAccess: true}, {visible: false}, {capability: {}}, {agentId: "agt_self"}]) {
+test("preparation resolves one exact recipient independently of directory capability hints", async () => {
+  for (const entry of [undefined, {targetId: "wrong"}, {agentId: "agt_self"},
+    {needsAccess: true}, {visible: false}, {capability: {}}]) {
     const f = naturalSelectionFixture({async collaborationDirectory() {
       return {entries: entry === undefined ? [] : [{targetId: "mem_a", memberId: "mem_a", targetType: "agent",
-        agentId: "agt_worker", visible: true, capability: {delegable: true}, ...entry}]}
+        agentId: "agt_worker", ...entry}]}
     }})
     await f.claim()
-    if (entry?.needsAccess || entry?.capability) {
-      const result = await f.tool("collaboration_prepare").execute({targetIds: ["mem_a"]}, f.exec)
-      assert.equal(result.state, "needs-access")
-      assert.equal(typeof result.channelId, "string")
-      assert.ok(result.channelId)
-      assert.equal(result.targets[0].agentId, "agt_worker")
-      assert.match(result.nextStep, /No intent, invitation or Task/u)
+    const result = f.tool("collaboration_prepare").execute({targetIds: ["mem_a"]}, f.exec)
+    if (!entry || entry.targetId || entry.agentId) {
+      await assert.rejects(result, /exact directory identity/u)
+      assert.equal(f.calls.length, 0)
     } else {
-      await assert.rejects(f.tool("collaboration_prepare").execute({targetIds: ["mem_a"]}, f.exec), /accessible, assignable/u)
+      assert.equal((await result).state, "ready")
+      assert.equal(f.calls.filter(([name]) => name === "activate").length, 1)
     }
-    assert.equal(f.calls.length, 0)
   }
 })
 
@@ -311,27 +308,6 @@ for (const method of ["collaborationDirectory", "collaborationStatus"]) {
     assert.equal(f.calls.filter(([name]) => name === "action").length, 0)
   })
 }
-
-test("a needs-access selection rechecks live access without changing participants", async () => {
-  const f = naturalSelectionFixture()
-  await f.claim()
-  const args = {targetIds: ["mem_a"]}, prepare = (input = args) => f.tool("collaboration_prepare").execute(input, f.exec)
-  const directory = f.actions.collaborationDirectory
-  let allowed = false
-  f.actions.collaborationDirectory = async request => {
-    const result = await directory(request)
-    result.entries[0].needsAccess = !allowed
-    return result
-  }
-  assert.equal((await prepare()).state, "needs-access")
-  assert.equal((await prepare()).state, "needs-access")
-  assert.equal(f.calls.filter(([name]) => name !== "directory").length, 0)
-  allowed = true
-  await assert.rejects(prepare({targetIds: ["mem_b"]}), /another collaborator set/u)
-  assert.equal((await prepare()).state, "ready")
-  assert.equal(f.calls.filter(([name]) => name === "directory").length, 3)
-  assert.equal(f.calls.filter(([name]) => name === "activate").length, 1)
-})
 
 test("a read retry cannot move the original selection to a different route or connection", async () => {
   for (const change of ["account", "channel", "revision"]) {
@@ -1415,7 +1391,7 @@ test("receipt-returning model tools execute with defineTool's unbound extracted 
   const calls = []
   const fixture = runtimeFixture({
     async collaborationDirectory(request) {
-      return {entries: [{targetId: request.query, memberId: request.query, targetType: request.query === "mem_colleague" ? "human" : "agent", capability: {assignable: true}}]}
+      return {entries: [{targetId: request.query, memberId: request.query, targetType: request.query === "mem_colleague" ? "human" : "agent", needsAccess: true, capability: {assignable: false}}]}
     },
     async collaborationAction(request) {
       calls.push(request)
@@ -1543,6 +1519,18 @@ test("needs-auth keeps the result pending and resumes it once after login", asyn
   await fixture.collaboration.status({sessionId: SESSION_ID})
   assert.equal(fixture.agent.sent.length, 1)
   assert.equal(states[0], "needs-auth")
+})
+
+test("ordinary API requests need no fresh chat input and actual collaboration feedback retains its origin on replay", () => {
+  const projection=createCollaborationReceiptProjection()
+  const origin=state=>runtimeFixture({}, {projectionState: state}).collaboration.isFeedbackTurn(SESSION_ID)
+  const message=source=>({type:"user/message",data:{source}})
+  const initial=projection.init()
+  assert.equal(origin(initial),false)
+  const feedback=projection.apply(initial,message({kind:"loop-collaboration",deliveryId:"delivery"}))
+  assert.equal(origin(projection.apply(feedback,{type:"turn/end"})),true)
+  const user=projection.apply(feedback,message({kind:"user",rpcId:"next"}))
+  assert.equal(origin(user),false)
 })
 
 test("restart replay does not reinject a committed result", async () => {

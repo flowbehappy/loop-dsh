@@ -129,7 +129,7 @@ test('native Human OAuth and management action agree with the real Loop API', { 
   assert.equal((await agent.read()).access_token, agentToken)
 
   assert.deepEqual(await request('humanCatalog'), { actions: [archive] })
-  // The native catalog also filters locally. Verify the server independently advertises only the frozen grant.
+  // The public catalog and the plugin must report the same grant.
   const bearer = { Authorization: 'Bearer ' + saved.access_token, Accept: 'application/json' }
   const listing = await loopFetch(resource + '/actions?available=true', { headers: bearer })
   assert.equal(listing.status, 200)
@@ -139,10 +139,10 @@ test('native Human OAuth and management action agree with the real Loop API', { 
   assert.equal(description.readOnly, false)
   assert.ok(description.inputSchema?.properties?.projectId, 'canonical schema carries the Project target')
   await assert.rejects(request('humanAction', { name: archive, arguments: { projectId: project } }), { code: 'loop-host/waiting-for-access' })
-  await assert.rejects(request('humanSchema', { name: 'project.restore' }), { code: 'loop-host/waiting-for-access' })
+  await assert.rejects(request('humanSchema', { name: 'project.restore' }), error => [403,404].includes(error.status))
   await assert.rejects(request('humanAction', {
     name: archive, requireReadOnly: false, arguments: { projectId: otherProject },
-  }), { code: 'loop-host/human-action-rejected', status: 403 })
+  }), { code: 'resource_not_granted', status: 403 })
   const result = await request('humanAction', { name: archive, requireReadOnly: false, arguments: { projectId: project } })
   assert.equal(result.data?.data?.project?.id, project)
   assert.equal(result.data.data.project.status, 'archived')

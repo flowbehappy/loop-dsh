@@ -68,7 +68,7 @@ remove the old home or its state as part of installing this package.
 Workspace sync compares the saved server, account, Loop workspace, Agent and
 channel with the current connection. The plugin automatically reconciles old Go channel records,
 replaced connection owners, and missing native records during workspace sync
-or when an action detects a stale route.
+or when an operation needs its saved conversation channel.
 The plugin checks the current grant and asks Loop to resolve the installation
 and local workspace to the original channel. Loop's ensure operation may create
 a mapping if one disappeared. A different channel, Agent or pending disconnect
@@ -78,7 +78,7 @@ Verified recovery permits previously captured sessions with the verified route
 to use that channel for new actions. Upload consent stays on its original
 revision, and earlier collaboration intents are invalidated. Start a new session
 to use automatic upload. Sessions without a verifiable prior route retain their
-existing restrictions. Preparing collaboration and reading a saved action context
+original connection identity. Business discovery, schema lookup and explicit invocations use the current credential on that connection. Loop checks the action and resources for every invocation. Preparing collaboration and reading a saved action context
 check native ownership before returning the route.
 
 The managed native entry uses the unified Host login. The repository ships only

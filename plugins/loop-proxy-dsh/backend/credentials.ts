@@ -82,11 +82,8 @@ export class HostCredentialStore {
     this.resource = this.server + "/api/v1/workspaces/" + encodeURIComponent(this.workspace) + "/external/" + (human ? "human" : "agent")
   }
   validate(value: Credential): void {
-    const scope = new Set(value.scope.split(/\s+/u))
     const invalidHuman = this.human && (value.principal_id !== this.human.account ||
-      value.token_endpoint !== this.server + "/api/v1/auth/oauth/human/token" || !scope.has("loop.human_access") || !scope.has("offline_access") ||
-      [...scope].some(item => !["loop.human_access", "loop.human_write", "loop.human_manage", "offline_access"].includes(item)) ||
-      (scope.has("loop.human_manage") && !scope.has("loop.human_write")) || !/^[\x21-\x7e]+$/u.test(value.access_token) ||
+      value.token_endpoint !== this.server + "/api/v1/auth/oauth/human/token" || !/^[\x21-\x7e]+$/u.test(value.access_token) ||
       value.host_callback_uri !== undefined || value.host_source !== undefined || value.host_page_proof !== undefined || value.device_credential !== undefined || value.disconnect !== undefined)
     if (value.resource !== this.resource || value.workspace_id !== this.workspace || invalidHuman ||
         new URL(serviceURL(value.token_endpoint)).origin !== new URL(this.server).origin) {

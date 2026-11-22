@@ -4,7 +4,7 @@ import {HostCredentialStore} from "./credentials.ts"
 import type {Credential,CredentialProvider} from "./credentials.ts"
 import {boundedJSON,LoopHTTP,TokenManager} from "./http.ts"
 import {LoopError,requireActive} from "./errors.ts"
-import {appActions,beginHumanOAuth,humanConsent,humanIssuerPath,sameList,sameScope} from "./human-oauth.ts"
+import {beginHumanOAuth,humanConsent,humanIssuerPath,sameList,sameScope} from "./human-oauth.ts"
 import type {CallbackBroker,HumanConsent,HumanOAuth,HumanSlot,HumanTokens} from "./human-oauth.ts"
 
 export type HumanOwner={accountPrincipal:string;workspaceId:string;policyKey?:string;includeGrant?:boolean;verify(signal:AbortSignal):Promise<void>}
@@ -77,16 +77,14 @@ export class HumanConnectionService {
     if(response.status===401)throw unavailable()
     throw new LoopError("loop-host/backend-unavailable","Loop Human grant request was rejected",response.status,method==="DELETE" && response.status>=500)
   }
-  private validate(raw:any,owner:HumanOwner,store:HostCredentialStore,connection:HumanSlot,expected:{clientID:string;scope:string;grantID?:string;consent?:HumanConsent}):HumanConsent {
+  private validate(raw:any,owner:HumanOwner,store:HostCredentialStore,expected:{clientID:string;scope:string;grantID?:string;consent?:HumanConsent}):HumanConsent {
     if(!Array.isArray(raw?.resourceConstraints) || raw.principalKind!=="human" || raw.humanUserId!==owner.accountPrincipal || raw.workspaceId!==owner.workspaceId || raw.resource!==store.resource ||
       raw.clientId!==expected.clientID || raw.status!=="active" || typeof raw.grantId!=="string" || !raw.grantId || (expected.grantID && raw.grantId!==expected.grantID) ||
       typeof raw.expiresAt!=="string" || !Number.isFinite(Date.parse(raw.expiresAt)) || Date.parse(raw.expiresAt)<=Date.now() || !sameScope(raw.scope,expected.scope))throw unavailable()
-    let consent:HumanConsent
-    try{consent=humanConsent({allowedActions:raw.allowedActions,resourceConstraints:raw.resourceConstraints,write:raw.scope.split(/\s+/u).includes("loop.human_write"),manage:raw.scope.split(/\s+/u).includes("loop.human_manage")},connection)}
-    catch{throw unavailable()}
-    if(!sameList(raw.allowedActions,consent.allowedActions)||!sameList(raw.resourceConstraints,consent.resourceConstraints)||
+    if(!Array.isArray(raw.allowedActions) || !raw.allowedActions.every((item:unknown)=>typeof item==="string") ||
+      !raw.resourceConstraints.every((item:unknown)=>typeof item==="string") ||
       (expected.consent && (!sameList(raw.allowedActions,expected.consent.allowedActions)||!sameList(raw.resourceConstraints,expected.consent.resourceConstraints))))throw unavailable()
-    return consent
+    return {allowedActions:raw.allowedActions,resourceConstraints:raw.resourceConstraints,scope:raw.scope}
   }
   private async verifyCurrent(owner:HumanOwner,connection:HumanSlot,store:HostCredentialStore,signal:AbortSignal){
     const credential=await store.read()
@@ -94,7 +92,7 @@ export class HumanConnectionService {
     const tokens=new TokenManager(store,credential,{fetch:this.fetcher})
     const current=await tokens.credential(signal)
     const raw=await this.session(store,"GET",current.access_token,signal)
-    const consent=this.validate(raw,owner,store,connection,{clientID:credential.client_id,scope:credential.scope,grantID:credential.grant_id})
+    const consent=this.validate(raw,owner,store,{clientID:credential.client_id,scope:credential.scope,grantID:credential.grant_id})
     await owner.verify(signal);requireActive(signal)
     return {credential,tokens,consent,expiresAt:raw.expiresAt as string}
   }
@@ -119,7 +117,7 @@ export class HumanConnectionService {
     }
   }
   async begin(owner:HumanOwner,connection:HumanSlot,input:any,request:AbortSignal){
-    const lifetime=this.ownerSignal(owner),consent=humanConsent(input,connection)
+    const lifetime=this.ownerSignal(owner),consent=humanConsent(input)
     const key=this.connectionKey(owner,connection)
     if(this.disconnecting.has(key))throw new LoopError("loop-host/conflict","Human disconnect is in progress")
     let previous=this.pending.get(key)
@@ -155,7 +153,7 @@ export class HumanConnectionService {
     const token:HumanTokens=await flow.result
     signal=AbortSignal.any([signal,AbortSignal.timeout(Math.max(1,Date.parse(flow.expiresAt)-Date.now()))])
     const raw=await this.session(store,"GET",token.accessToken,signal)
-    this.validate(raw,owner,store,connection,{clientID:token.clientID,scope:token.scope,consent})
+    this.validate(raw,owner,store,{clientID:token.clientID,scope:token.scope,consent})
     await owner.verify(signal)
     const saved=await store.publish({version:1,principal_id:owner.accountPrincipal,workspace_id:owner.workspaceId,grant_id:raw.grantId,
       resource:store.resource,token_endpoint:store.server+humanIssuerPath+"/token",client_id:token.clientID,scope:token.scope,
@@ -203,7 +201,7 @@ export class HumanConnectionService {
       let current=credential, revoked=false
       const revoke=async()=>{
         const raw=await this.session(store,"GET",current.access_token,signal)
-        try{this.validate(raw,owner,store,connection,{grantID:credential.grant_id,clientID:credential.client_id,scope:credential.scope})}
+        try{this.validate(raw,owner,store,{grantID:credential.grant_id,clientID:credential.client_id,scope:credential.scope})}
         catch{throw new LoopError("loop-host/conflict","Human grant identity did not match; nothing was revoked")}
         await owner.verify(signal);requireActive(signal)
         const latest=await store.read()
@@ -230,26 +228,23 @@ export class HumanConnectionService {
     const signal=AbortSignal.any([this.ownerSignal(owner,request),this.slotSignal(owner,connection)])
     if(this.disconnecting.has(this.connectionKey(owner,connection)))throw unavailable()
     const store=this.store(owner,connection)
-    const {credential,tokens,consent}=await this.verifyCurrent(owner,connection,store,signal)
+    const {credential,tokens}=await this.verifyCurrent(owner,connection,store,signal)
     if(input.expectedGrantId !== undefined && credential.grant_id !== input.expectedGrantId)throw unavailable()
     const client=new ActionClient(new LoopHTTP(tokens,store.resource,this.fetcher))
-    const permitted=(name:string)=>appActions.has(name)===(connection==="apps") && consent.allowedActions.includes(name)
     try{
       if(kind==="humanCatalog"){
         if(input.prefix!==undefined && typeof input.prefix!=="string")throw new LoopError("loop-host/invalid-request","Invalid Human action prefix")
         const catalog=await client.actions(signal)
         await owner.verify(signal);requireActive(signal)
-        return {actions:catalog.map(item=>item.id).filter(name=>permitted(name)&&(!input.prefix||name.startsWith(input.prefix))).sort()}
+        return {actions:catalog.map(item=>item.id).filter(name=>!input.prefix||name.startsWith(input.prefix)).sort()}
       }
-      if(typeof input.name!=="string" || !permitted(input.name))throw new LoopError("loop-host/waiting-for-access","Action is not granted in the selected Human connection")
-      const schema=await client.describe(input.name,signal)
-      if(schema?.id!==input.name)throw new LoopError("loop-host/backend-invalid","Invalid Loop Human action schema")
-      if(kind==="humanSchema"){await owner.verify(signal);requireActive(signal);return schema}
-      if(input.requireReadOnly!==false && schema.readOnly!==true)throw new LoopError("loop-host/waiting-for-access","Current human intent is required for this action")
+      if(kind==="humanSchema" || input.requireReadOnly!==false){
+        const schema=await client.describe(input.name,signal)
+        if(schema?.id!==input.name)throw new LoopError("loop-host/backend-invalid","Invalid Loop Human action schema")
+        if(kind==="humanSchema"){await owner.verify(signal);requireActive(signal);return schema}
+        if(schema.readOnly!==true)throw new LoopError("loop-host/waiting-for-access","Current human intent is required for this action")
+      }
       const args=input.arguments===undefined?{}:input.arguments
-      if(input.name==="app.invoke" && (typeof args?.extensionName!=="string" || typeof args.action!=="string" ||
-        !consent.resourceConstraints.includes("app:"+args.extensionName) || !consent.resourceConstraints.includes("app-action:"+args.extensionName+"/"+args.action)))
-        throw new LoopError("loop-host/waiting-for-access","App and Action must match the exact granted locators")
       await owner.verify(signal);requireActive(signal)
       const result=await client.invoke(input.name,args,signal)
       requireActive(signal)
@@ -264,7 +259,7 @@ export class HumanConnectionService {
         }else if(error.status===403){
           message="Loop denied the Human action. Check the action grant, its resource constraints and the Human's access to the target."
         }
-        throw new LoopError("loop-host/human-action-rejected",message,error.status,error.outcomeUnknown)
+        throw new LoopError(error.code,message,error.status,error.outcomeUnknown)
       }
       throw error
     }

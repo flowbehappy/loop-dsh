@@ -634,15 +634,6 @@ export class CollaborationSessionRuntime {
       this.patch({ error: { code: 'loop-collaboration/not-bound', message: 'Choose a Loop board first.' } })
       return
     }
-    if (!board.capability.available) {
-      this.patch({
-        error: {
-          code: 'loop-collaboration/capability-unsupported',
-          message: board.capability.reason ?? '',
-        },
-      })
-      return
-    }
     if (this.options.remote.collaborationBind === undefined) {
       this.patch({ error: { code: 'loop-collaboration/capability-unsupported', message: 'This Loop Host needs an update.' } })
       return
