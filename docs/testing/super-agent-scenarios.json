@@ -1,0 +1,487 @@
+{
+  "schemaVersion": 1,
+  "rules": [
+    "Use synthetic accounts and isolated DSH Home, working directory, ports and database.",
+    "Never reuse daily tokens, tasks or database.",
+    "Read both TiDB memory limits before testing.",
+    "A real-model label requires actual remote model requests; deterministic fixtures are protocol tests.",
+    "Store per-run commit IDs, environment, logs and pass/fail/skip/not-run separately.",
+    "Verify effects through canonical APIs; model prose is not proof.",
+    "Keep failed attempts and distinguish fixture errors from product failures."
+  ],
+  "suites": [
+    {
+      "id": "channel-consent",
+      "automation": "plugins/loop-proxy-dsh/test/native-dsh-runtime.test.mjs",
+      "environment": {
+        "LOOP_TS_E2E_CHANNEL": "1"
+      },
+      "fixture": "plugins/loop-proxy-dsh/test/native-dsh-channel-fixture.mjs",
+      "coverage": [
+        "original channel question",
+        "decline and retry",
+        "duplicate names",
+        "exact slug selection",
+        "Human without access",
+        "missing channel",
+        "explicit default channel",
+        "legacy message command",
+        "public self-join",
+        "repeat join",
+        "Human invite link rejection",
+        "private self-join denial",
+        "ambiguous task board",
+        "Human task consent",
+        "existing Agent task creation"
+      ]
+    },
+    {
+      "id": "business",
+      "automation": "plugins/loop-proxy-dsh/test/native-dsh-runtime.test.mjs",
+      "environment": {
+        "LOOP_TS_E2E_BUSINESS": "1"
+      },
+      "coverage": [
+        "project selection",
+        "decline and reassign",
+        "knowledge document creation",
+        "private channel creation",
+        "invite Human",
+        "mention Human",
+        "duplicate send"
+      ]
+    },
+    {
+      "id": "generic-delegation",
+      "automation": [
+        "plugins/loop-proxy-dsh/test/native-delegation-targets.test.mjs",
+        "plugins/loop-proxy-dsh/test/native-real-loop.test.mjs"
+      ],
+      "coverage": [
+        "message send/search/history target normalization",
+        "task locator normalization",
+        "frozen consent/execution arguments",
+        "unchanged stable IDs/DM/reply-thread/opaque app payload",
+        "unknown/ambiguous/denied/canceled lookup",
+        "scope substitution rejection",
+        "repeat resolution without grant cache",
+        "real OAuth and canonical message readback"
+      ]
+    },
+    {
+      "id": "gui",
+      "level": "actual-web-and-desktop",
+      "steps": [
+        "use isolated profile; token sign-in",
+        "authorize personal pages",
+        "open Tasks, Projects, Knowledge, Drive, Data Spaces, Experts & Skills, Contacts, Workflows",
+        "restart and reopen Tasks",
+        "exercise ordinary request, decline, approve, reuse, revoke, app authorization",
+        "revoke login token and confirm iframe exits"
+      ],
+      "expected": "correct page and identity at every step; revocation takes effect; no daily environment changes"
+    }
+  ],
+  "provenance": {
+    "capturedOn": "2026-11-22",
+    "window": "2026-11-21 through 2026-11-22",
+    "description": "Recent Loop/DSH session regressions, retained as reusable scenarios rather than historical pass claims."
+  },
+  "realModel": {
+    "automation": "Scenario specifications; replay each entire group with real remote model requests and canonical API assertions. This catalog alone is not an executable test.",
+    "groups": [
+      {
+        "id": "dm-first",
+        "level": "real-model-dsh",
+        "preconditions": "双方尚无私聊；个人助手不具备代发权限",
+        "steps": "读取既有私聊，然后明确以本人身份发送",
+        "expected": "读取不创建会话；批准后仅创建一条 Human 私聊，收件人收件箱可见",
+        "evidence": [
+          "DSH session and tool trace",
+          "canonical Human API readback"
+        ],
+        "checkpoints": [
+          {
+            "id": "live.dm-first.no-dm-read",
+            "checkpoint": "no-dm-read"
+          },
+          {
+            "id": "live.dm-first.first-dm-send",
+            "checkpoint": "first-dm-send"
+          }
+        ]
+      },
+      {
+        "id": "dm-human",
+        "level": "real-model-dsh",
+        "preconditions": "同事已在与本人私聊中发送随机回执",
+        "steps": "依次拒绝代发、申请只读、批准本人回复",
+        "expected": "拒绝零投递；准确读到回执；回复作者为本人",
+        "evidence": [
+          "DSH session and tool trace",
+          "canonical Human API readback"
+        ],
+        "checkpoints": [
+          {
+            "id": "live.dm-human.dm-declined",
+            "checkpoint": "dm-declined"
+          },
+          {
+            "id": "live.dm-human.owner-incoming-dm",
+            "checkpoint": "owner-incoming-dm"
+          },
+          {
+            "id": "live.dm-human.owner-outgoing-dm",
+            "checkpoint": "owner-outgoing-dm"
+          }
+        ]
+      },
+      {
+        "id": "dm-retry",
+        "level": "real-model-dsh",
+        "preconditions": "准备同一 clientMessageId 与消息内容",
+        "steps": "重复提交同一项明确授权的私聊请求",
+        "expected": "两次返回同一 messageId，收件人仅有一条消息",
+        "evidence": [
+          "DSH session and tool trace",
+          "canonical Human API readback"
+        ],
+        "checkpoints": [
+          {
+            "id": "live.dm-retry.send-1",
+            "checkpoint": "send-1"
+          },
+          {
+            "id": "live.dm-retry.send-2",
+            "checkpoint": "send-2"
+          }
+        ]
+      },
+      {
+        "id": "documents",
+        "level": "real-model-dsh",
+        "preconditions": "Agent 可访问知识库，同事无文档权限",
+        "steps": "查找文档、追加内容、分享链接",
+        "expected": "保留原文及文档 ID；只分享正确链接，不复制正文或增授权限",
+        "evidence": [
+          "DSH session and tool trace",
+          "canonical Human API readback"
+        ],
+        "checkpoints": [
+          {
+            "id": "live.documents.document-find",
+            "checkpoint": "document-find"
+          },
+          {
+            "id": "live.documents.document-edit",
+            "checkpoint": "document-edit"
+          },
+          {
+            "id": "live.documents.share-document",
+            "checkpoint": "share-document"
+          }
+        ]
+      },
+      {
+        "id": "manual",
+        "level": "real-model-dsh",
+        "preconditions": "准备本人和同事的精确 memberId",
+        "steps": "通过 human authorize 手动申请 message.send 后发送",
+        "expected": "范围固定 dm:@memberId；收到一条 Human 消息",
+        "evidence": [
+          "DSH session and tool trace",
+          "canonical Human API readback"
+        ],
+        "checkpoints": [
+          {
+            "id": "live.manual.manual-authorize",
+            "checkpoint": "manual-authorize"
+          }
+        ]
+      },
+      {
+        "id": "names",
+        "level": "real-model-dsh",
+        "preconditions": "两位同事显示名相同，任务未指派",
+        "steps": "按显示名指派，再澄清登录名",
+        "expected": "澄清前无写入；澄清后负责人 ID 与选定者一致",
+        "evidence": [
+          "DSH session and tool trace",
+          "canonical Human API readback"
+        ],
+        "checkpoints": [
+          {
+            "id": "live.names.same-name-person",
+            "checkpoint": "same-name-person"
+          },
+          {
+            "id": "live.names.select-one-person",
+            "checkpoint": "select-one-person"
+          }
+        ]
+      },
+      {
+        "id": "partial",
+        "level": "real-model-dsh",
+        "preconditions": "频道同时有本人及同事消息；助手仅见部分",
+        "steps": "询问大家讨论内容，再明确用本人视角核实",
+        "expected": "助手视图不冒充完整频道历史；总结必须明确可见范围；拒绝本人授权后不得读出同事随机回执。断言接受明确的同义表述，例如“从助手可见的消息看”，不要锁死一句话。",
+        "evidence": [
+          "DSH session and tool trace",
+          "canonical Human API readback"
+        ],
+        "checkpoints": [
+          {
+            "id": "live.partial.partial-history",
+            "checkpoint": "partial-history"
+          },
+          {
+            "id": "live.partial.partial-human-recheck",
+            "checkpoint": "partial-human-recheck",
+            "expected": "明确请求本人身份并批准精确频道只读授权后，读出同事随机回执；拒绝时不得读取。"
+          }
+        ]
+      },
+      {
+        "id": "permission-check",
+        "level": "real-model-dsh",
+        "preconditions": "同事无文档访问权",
+        "steps": "查改文档，再要求检查同事能否打开",
+        "expected": "不扩大权限，不发送正文；无法核实就明确说明",
+        "evidence": [
+          "DSH session and tool trace",
+          "canonical Human API readback"
+        ],
+        "checkpoints": [
+          {
+            "id": "live.permission-check.document-find",
+            "checkpoint": "document-find"
+          },
+          {
+            "id": "live.permission-check.document-edit",
+            "checkpoint": "document-edit"
+          },
+          {
+            "id": "live.permission-check.check-before-sharing",
+            "checkpoint": "check-before-sharing"
+          }
+        ]
+      },
+      {
+        "id": "precision",
+        "level": "real-model-dsh",
+        "preconditions": "频道已有原消息及独立讨论串",
+        "steps": "回复讨论串、读取新回复、添加和撤回表情、私聊及回读",
+        "expected": "讨论串和私聊无频道副本；表情计数正确；回读随机标记一致",
+        "evidence": [
+          "DSH session and tool trace",
+          "canonical Human API readback"
+        ],
+        "checkpoints": [
+          {
+            "id": "live.precision.thread-reply",
+            "checkpoint": "thread-reply"
+          },
+          {
+            "id": "live.precision.thread-read",
+            "checkpoint": "thread-read"
+          },
+          {
+            "id": "live.precision.reaction-add",
+            "checkpoint": "reaction-add"
+          },
+          {
+            "id": "live.precision.reaction-remove",
+            "checkpoint": "reaction-remove"
+          },
+          {
+            "id": "live.precision.named-dm",
+            "checkpoint": "named-dm"
+          },
+          {
+            "id": "live.precision.dm-readback",
+            "checkpoint": "dm-readback"
+          }
+        ]
+      },
+      {
+        "id": "readable-doc",
+        "level": "real-model-dsh",
+        "preconditions": "同事已有文档只读权",
+        "steps": "查找、追加原文、分享链接",
+        "expected": "同一文档保留原文；仅发链接；同事打开后能见更新",
+        "evidence": [
+          "DSH session and tool trace",
+          "canonical Human API readback"
+        ],
+        "checkpoints": [
+          {
+            "id": "live.readable-doc.document-find",
+            "checkpoint": "document-find"
+          },
+          {
+            "id": "live.readable-doc.document-edit",
+            "checkpoint": "document-edit"
+          },
+          {
+            "id": "live.readable-doc.share-document",
+            "checkpoint": "share-document"
+          }
+        ]
+      },
+      {
+        "id": "schedule",
+        "level": "real-model-dsh",
+        "preconditions": "可写入指定频道",
+        "steps": "创建两小时后提醒、暂停、恢复、取消",
+        "expected": "同一个 schedule ID；未到点不发送；恢复不复制；取消后不再运行",
+        "evidence": [
+          "DSH session and tool trace",
+          "canonical Human API readback"
+        ],
+        "checkpoints": [
+          {
+            "id": "live.schedule.schedule-create",
+            "checkpoint": "schedule-create"
+          },
+          {
+            "id": "live.schedule.schedule-pause",
+            "checkpoint": "schedule-pause"
+          },
+          {
+            "id": "live.schedule.schedule-resume",
+            "checkpoint": "schedule-resume"
+          },
+          {
+            "id": "live.schedule.schedule-cancel",
+            "checkpoint": "schedule-cancel"
+          }
+        ]
+      },
+      {
+        "id": "tasks",
+        "level": "real-model-dsh",
+        "preconditions": "频道已有任务和明确同事",
+        "steps": "按姓名派工、任务讨论留言、改名保留负责人",
+        "expected": "负责人 ID 正确；留言只在任务时间线；改名不改负责人",
+        "evidence": [
+          "DSH session and tool trace",
+          "canonical Human API readback"
+        ],
+        "checkpoints": [
+          {
+            "id": "live.tasks.handoff-by-name",
+            "checkpoint": "handoff-by-name"
+          },
+          {
+            "id": "live.tasks.task-discussion",
+            "checkpoint": "task-discussion"
+          },
+          {
+            "id": "live.tasks.rename-preserves-assignee",
+            "checkpoint": "rename-preserves-assignee"
+          }
+        ]
+      },
+      {
+        "id": "team",
+        "level": "real-model-dsh",
+        "preconditions": "本人有创建 Team 权限",
+        "steps": "创建唯一名字的团队，不加其他成员",
+        "expected": "本人目录恰好一条，未擅自增员",
+        "evidence": [
+          "DSH session and tool trace",
+          "canonical Human API readback"
+        ],
+        "checkpoints": [
+          {
+            "id": "live.team.new-team",
+            "checkpoint": "new-team"
+          }
+        ]
+      },
+      {
+        "id": "timer",
+        "level": "real-model-dsh",
+        "preconditions": "服务端定时功能可用",
+        "steps": "约一分钟后向指定频道发送一次提醒",
+        "expected": "服务端保存安排；收件人最终恰好收到一条，核对运行记录",
+        "evidence": [
+          "DSH session and tool trace",
+          "canonical Human API readback"
+        ],
+        "checkpoints": [
+          {
+            "id": "live.timer.scheduled-delivery",
+            "checkpoint": "scheduled-delivery"
+          }
+        ]
+      }
+    ]
+  },
+  "loopHttp": {
+    "repository": "Loop",
+    "idPrefix": "loop.",
+    "preconditions": "latest main, isolated 2 GiB TiDB, explicit external test DSN",
+    "command": "go test -tags=e2e -p 1 ./e2e/scenarios/... -run ^<test>$ -parallel 1 -count=1",
+    "expected": "all assertions pass; report every skip/failure independently",
+    "tests": [
+      "TestAllChannelBroadcast",
+      "TestChannelLifecyclePermissionAgentVisibilityAndShareCard",
+      "TestChannelMembershipRoutingMatrix",
+      "TestConversationReadMutePinArchiveLookupAndBulkState",
+      "TestCreatePrivateChannel",
+      "TestExternalHostSyncCursorRecoveryAndConflictingReplay",
+      "TestExternalHostSyncLoopReplyReturnsToHostCursor",
+      "TestExternalHostSyncPrivateConversationVisibleCaptureAndIsolation",
+      "TestExternalHostSyncProjectAssociationKeepsPrivateHistoryBoundary",
+      "TestExternalHostSyncTaskAssociationKeepsPrivateHistoryBoundary",
+      "TestExternalHumanDelegatedActorOrdinaryResourceJourneyAndAuthorityIsolation",
+      "TestExternalHumanProjectManagementUsesCanonicalProjectOwner",
+      "TestHumanDMDelivery",
+      "TestHumanDMMultiStepRoutingMatrix",
+      "TestHumanDMOpenIsIdempotent",
+      "TestInternalAndSuperAgentsCollaborateOnTask",
+      "TestMessageEditRecallReactionPinTopNoticeAndSearch",
+      "TestMultiChannelMultiMemberRoutingMatrix",
+      "TestOwnerCanAssignPersonalAssistantDocumentReview",
+      "TestPersonalAssistantPeerMentionAndClientPresence",
+      "TestPrivateChannelMessageRoundTrip",
+      "TestPrivateChannelTaskVisibility",
+      "TestReplyThreadFromChannelMessage",
+      "TestReplyThreadRoutingMatrix",
+      "TestSingleChannelVisibilityScenarios",
+      "TestSuperAgentActionHTTPRestartReconnectAndIdempotentEffects",
+      "TestSuperAgentAppExtensionProviderAuditDenyAndRevoke",
+      "TestSuperAgentChannelAnnouncementAndMemberLifecycle",
+      "TestSuperAgentChannelResourceReadAndDeny",
+      "TestSuperAgentDriveContentTransferLifecycle",
+      "TestSuperAgentKnowledgeApprovalCommandsExecuteCanonicalOwners",
+      "TestSuperAgentKnowledgeApprovalDenialsRevocationAndCancellation",
+      "TestSuperAgentKnowledgeDownloadReceiptResumesAndRejectsWrongGrant",
+      "TestSuperAgentKnowledgeRepositoryBrowseSearchReadVersions",
+      "TestSuperAgentKnowledgeSelectionRevokesDocumentCreate",
+      "TestSuperAgentKnowledgeSelectionRevokesDocumentRead",
+      "TestSuperAgentKnowledgeSourceFileDocumentAndRevocation",
+      "TestSuperAgentManualWorkflowReturnsVerifiedOutput",
+      "TestSuperAgentMessageAttachmentUploadViewSendAndDeny",
+      "TestSuperAgentMessageReactionOwnerAuthorization",
+      "TestSuperAgentMessageSendHistoryAndIdempotentReplay",
+      "TestSuperAgentProjectMilestoneAndResourceLifecycle",
+      "TestSuperAgentProjectOverviewContract",
+      "TestSuperAgentProjectResourceAuthorizationAndUpdate",
+      "TestSuperAgentProjectTaskDependencyLifecycleAndDenials",
+      "TestSuperAgentRemainingCapabilityWorkflowScheduleTriggerE2E",
+      "TestSuperAgentScheduledMessageLifecycleAndScopedDenial",
+      "TestSuperAgentTaskGetPreservesStableIdentity",
+      "TestSuperAgentTaskStateMachineAndHumanReadback",
+      "TestSuperAgentTeamCRUDMemberAndVersionDenial",
+      "TestSuperAgentWorkflowCallbackAndChannelMention",
+      "TestSuperAgentWorkflowPlanRunInspectResumeAndCancel",
+      "TestSuperAgentWorkspaceAndAgentDiscoveryAvatarLifecycle",
+      "TestSuperAgentWorkspaceChannelExactLookup",
+      "TestSuperAgentsTaskRevisionConflictRereadAndRetry",
+      "TestThreadSubscriptionStatesAndShareCardSnapshot"
+    ]
+  }
+}

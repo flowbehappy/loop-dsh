@@ -83,6 +83,33 @@ async function resolveChannel(client: ActionClient, channelName: unknown, signal
   return channel
 }
 
+/** Resolve existing channel references before consent, then freeze the same input
+ * for execution. Only protocol locator fields are examined; content is opaque. */
+export async function prepareDelegation(client: ActionClient, action: string, args: Record<string,unknown> | undefined, signal?: AbortSignal) {
+  const domain = action.split(".")[0]
+  const keys = domain === "message" ? ["target"] : domain === "task" ? ["channel", "board"] : []
+  let input = args
+  const resources = new Set<string>()
+  const resolved = new Map<string,string>()
+  for (const key of keys) {
+    const value = input?.[key]
+    if (typeof value !== "string" || !/^#[a-z0-9][a-z0-9-]*$/u.test(value)) continue
+    let id = resolved.get(value)
+    if (!id) {
+      id = (await resolveChannel(client,value,signal)).channelId as string
+      resolved.set(value,id)
+    }
+    resources.add("channel:"+id)
+    input = {...input, [key]:key === "target" ? "channel:"+id : key === "board" ? {kind:"channel",scopeId:id} : id}
+  }
+  const delegation = await client.delegationPreview(action,input,signal)
+  if (resources.size && (delegation?.action !== action || delegation.workspaceWide !== false ||
+      !Array.isArray(delegation.resourceConstraints) || [...resources].some(resource => !delegation.resourceConstraints.includes(resource)))) {
+    throw new LoopError("loop-host/backend-invalid","Loop did not confirm the resolved channel authorization.")
+  }
+  return {delegation, ...(input !== args ? {delegationArguments:input} : {})}
+}
+
 export async function joinNamedChannel(client: ActionClient, name: unknown, self: () => Promise<string>, signal?: AbortSignal) {
   const channel = await resolveChannel(client, name, signal)
   if (channel.joined !== true) {

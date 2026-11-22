@@ -16,7 +16,7 @@ import {randomUUID,randomBytes,createHash} from "node:crypto"
 import {HostCredentialStore, serviceURL} from "./credentials.ts"
 import type {CredentialProvider, Credential} from "./credentials.ts"
 import {TokenManager, LoopHTTP} from "./http.ts"
-import {ActionClient, createNamedChannelTask, joinNamedChannel, readNamedChannel, requestHumanDM, shareDocumentLink} from "./actions.ts"
+import {prepareDelegation, ActionClient, createNamedChannelTask, joinNamedChannel, readNamedChannel, requestHumanDM, shareDocumentLink} from "./actions.ts"
 import {beginHostLogin} from "./oauth.ts"
 import type {HostLogin} from "./oauth.ts"
 import {LoopError, requireActive} from "./errors.ts"
@@ -170,6 +170,9 @@ export class LoopBackend {
   }
   delegationPreview(context: ActionContext, name: string, args: Record<string,unknown> | undefined, signal?: AbortSignal) {
     return this.action(context, signal, (client, combined) => client.delegationPreview(name, args, combined))
+  }
+  prepareDelegation(context: ActionContext, name: string, args: Record<string,unknown> | undefined, signal?: AbortSignal) {
+    return this.action(context,signal,(client,combined)=>prepareDelegation(client,name,args,combined))
   }
   joinChannel(context: ActionContext, name: unknown, signal?: AbortSignal) {
     return this.action(context, signal, (client, combined, tokens) => joinNamedChannel(client, name, async () => {

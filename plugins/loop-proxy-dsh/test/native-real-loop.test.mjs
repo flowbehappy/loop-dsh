@@ -332,6 +332,48 @@ for(const failure of ['none','create-response','execute-response','model-respons
   const catalog=await facade.agentCatalog({workspaceId:'local-workspace'});assert.ok(catalog.actions.includes('workspace.list'))
   const schema=await facade.agentSchema({workspaceId:'local-workspace',name:'workspace.list'});assert.equal(schema.id,'workspace.list')
   const listed=await facade.agentAction({workspaceId:'local-workspace',sessionId:'session-native',name:'workspace.list',arguments:{kind:'summary'}});assert.ok(listed.data)
+  if (failure === 'none') {
+    const channel=await api('POST','/api/v1/workspaces/'+workspace+'/channels',{name:'delegation-'+randomUUID().slice(0,8),visibility:'private'})
+    const otherChannel=await api('POST','/api/v1/workspaces/'+workspace+'/channels',{name:'other-'+randomUUID().slice(0,8),visibility:'private'})
+    const target='#'+channel.slug, resource='channel:'+channel.id
+    assert.ok(channel.slug && channel.id)
+    for (const [name,arguments_] of [
+      ['message.send',{target,content:'Scoped delegation regression',clientMessageId:randomUUID()}],
+      ['message.search',{target,query:'Scoped delegation'}],
+    ]) {
+      const prepared=await facade.agentAction({workspaceId:'local-workspace',sessionId:'session-native',name,arguments:arguments_,delegationArguments:arguments_,prepareDelegation:true})
+      assert.equal(prepared.delegation.action,name)
+      assert.deepEqual(prepared.delegation.resourceConstraints,[resource])
+      assert.deepEqual(prepared.delegationArguments,{...arguments_,target:resource})
+      const connection='business'
+      const pending=await facade.beginHumanLogin({connection,allowedActions:[name],resourceConstraints:[resource],write:prepared.delegation.write,manage:false})
+      const login=new URL(pending.challenge.loginUrl),q=login.searchParams
+      const consent=await api('POST',login.pathname,{responseType:'code',clientId:q.get('client_id'),redirectUri:q.get('redirect_uri'),workspaceId:workspace,resource:q.get('resource'),state:q.get('state'),scope:q.get('scope'),codeChallenge:q.get('code_challenge'),codeChallengeMethod:'S256',allowedActions:[name],resourceConstraints:[resource]})
+      assert.equal((await fetch(consent.redirectTo,{redirect:'error'})).status,200)
+      for(let i=0;i<100;i++) {
+        if((await facade.completeHumanLogin({connection,challengeId:pending.challenge.id})).state==='connected')break
+        await delay(25)
+      }
+      const refs={connection,workspaceId:'local-workspace',sessionId:'session-native',name,requireReadOnly:false}
+      await t.test('scoped Human execution: '+name,async execution=>{
+        try {
+          const response=await facade.humanAction({...refs,arguments:prepared.delegationArguments})
+          assert.ok(response.data)
+        } catch(error) {
+          if(name==='message.search' && error.status===503 && error.code==='unavailable') {
+            execution.skip('Test Hub message search is unavailable; consent was verified, search results were not')
+            return
+          }
+          throw error
+        }
+      })
+      await assert.rejects(facade.humanAction({...refs,arguments:{...prepared.delegationArguments,target:'channel:'+otherChannel.id}}),error=>error.status===403)
+      await facade.disconnectHuman({connection})
+    }
+    const history=await api('GET','/api/v1/workspaces/'+workspace+'/scopes/'+channel.id+'/messages?limit=10')
+    assert.ok(JSON.stringify(history).includes('Scoped delegation regression'))
+    t.diagnostic('Generic send/search consent normalized the exact channel and rejected a substituted target')
+  }
   const knowledge=await facade.knowledgeCatalog({workspaceId:'local-workspace',sessionId:'session-native'})
   assert.equal(knowledge.scope.catalog,'knowledge');assert.equal(knowledge.scope.accountId,registered.user.id)
   const skills=await facade.skillCatalog({workspaceId:'local-workspace',sessionId:'session-native',limit:10})

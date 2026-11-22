@@ -408,9 +408,9 @@ export class NativeHostActions {
             return this.backend.channelHistory(context,{...page,channelName:target},true,combined,error)
           }
           try {
-            const delegation = await this.backend.delegationPreview(context,input.name,input.delegationArguments,combined)
-            if (delegation?.action!==input.name) throw error
-            return {error:{code:error.code,message:error.message},delegation}
+            const prepared = await this.backend.prepareDelegation(context,input.name,input.delegationArguments,combined)
+            if (prepared.delegation?.action!==input.name) throw error
+            return {error:{code:error.code,message:error.message},...prepared}
           } catch (previewError) {
             if (previewError instanceof LoopError && previewError.status===400) throw previewError
             throw error
