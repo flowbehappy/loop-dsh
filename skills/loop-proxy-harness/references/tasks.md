@@ -92,8 +92,7 @@ create work, notify anyone, or prove channel membership.
 4. After an invitation, retry preparation to confirm membership, then call `collaboration_dispatch` with exactly one
    `tasks: [{title, description, assignee}]` item. Use the directory's **memberId**
    for assignee. The Host supplies the bound channel and creates AND assigns the
-   Task. Do not create a second Task with `task.create` first. A requested project
-   must match the Host binding. If a confirmed member cannot be assigned, check
+   Task. Do not create a second Task with `task.create` first. For a task owned directly by a named project, use `resource.lookup` if its name is missing from the Agent’s list. Use `project.grant-member` for a missing membership, then call `task.create` with the project and the requested assignee together. If a confirmed member cannot be assigned, check
    task visibility and the returned access decision. An existing member does
    not need another invitation. Changing who can see the channel or Task
    requires its own authorization.

@@ -60,7 +60,6 @@ export class HumanTaskConsent {
     this.pending = new Map()
     this.approved = new WeakMap()
     this.offers = new WeakMap()
-    this.declinedSelections = new WeakMap()
     this.changed = new EventEmitter()
     this.control = new AbortController()
   }
@@ -76,21 +75,10 @@ export class HumanTaskConsent {
     } finally { await changes.return() }
   }
 
-  decide({sessionId,requestId,decision,resourceUrl}) {
+  decide({sessionId,requestId,decision}) {
     const entry = this.pending.get(sessionId)
     if (!entry || entry.view?.requestId !== requestId || this.current(sessionId) !== entry.message) throw refusal("This task authorization is no longer active.")
     if (decision === "cancel") entry.cancel.abort(refusal("The user declined task authorization."))
-    else if (decision === "select" && entry.view.state === "pick") {
-      const index = new URL(entry.view.browseUrl)
-      const link = new URL(resourceUrl)
-      const prefix = index.pathname + "/"
-      const id = link.pathname.slice(prefix.length).split("/")[0]
-      const valid = entry.view.family === "project" ? /^proj_[a-z0-9]+$/u : /^kb_[a-z0-9]+$/u
-      if (link.origin !== index.origin || link.username || link.password || !link.pathname.startsWith(prefix) || !valid.test(id)) {
-        throw refusal("Choose a resource from this Loop workspace.")
-      }
-      entry.resolve(id)
-    }
     else if (decision === "reuse" && entry.view.state === "reuse") entry.resolve()
     else throw refusal("This task requires confirmation in Loop.")
     return {}
@@ -99,39 +87,6 @@ export class HumanTaskConsent {
   canOffer(message) {
     const text = userText(message)
     return Boolean(text) && !assistantOnly.test(text) && !noPersonalAccess.test(text)
-  }
-
-  async pick(sessionId,message,family,signal) {
-    if (!["project","kb"].includes(family) || !this.canOffer(message) || this.current(sessionId)!==message) throw refusal("Resource selection needs a current user request.")
-    const owner = await this.owner(sessionId,signal)
-    if (!owner.loopWorkspaceId || this.current(sessionId)!==message || this.pending.has(sessionId)) throw refusal("The session is no longer ready for selection.")
-    if (this.declinedSelections.get(message)?.has(family)) throw refusal("The user already declined this selection.")
-    const list = family === "project" ? "projects" : "kb"
-    const browseUrl = owner.serviceBaseUrl+"/w/"+encodeURIComponent(owner.loopWorkspaceId)+"/"+list
-    const cancel = new AbortController()
-    const active = AbortSignal.any([signal,this.control.signal,cancel.signal,AbortSignal.timeout(300_000)])
-    active.throwIfAborted()
-    const decision = Promise.withResolvers()
-    const abort = () => decision.reject(active.reason)
-    active.addEventListener("abort",abort,{once:true})
-    this.pending.set(sessionId,{message,cancel,resolve:decision.resolve,view:{state:"pick",family,browseUrl,requestId:randomUUID()}})
-    this.changed.emit(sessionId)
-    try {
-      const id = await decision.promise
-      const current = await this.owner(sessionId,active)
-      if (this.current(sessionId)!==message || current.serviceBaseUrl!==owner.serviceBaseUrl || current.loopWorkspaceId!==owner.loopWorkspaceId || current.accountPrincipal!==owner.accountPrincipal) throw refusal("The originating Loop connection changed.")
-      return {workspaceId:owner.loopWorkspaceId,[family==="project"?"projectId":"kbId"]:id}
-    } catch (error) {
-      if (cancel.signal.aborted) {
-        const declined = this.declinedSelections.get(message) ?? new Set()
-        this.declinedSelections.set(message,declined.add(family))
-      }
-      throw error
-    } finally {
-      active.removeEventListener("abort",abort)
-      this.pending.delete(sessionId)
-      this.changed.emit(sessionId)
-    }
   }
 
   async offer(sessionId, message, owner, preview, description, signal, input = "", agentDenied = true) {

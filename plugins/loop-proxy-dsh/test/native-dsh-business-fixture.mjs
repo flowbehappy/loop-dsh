@@ -24,26 +24,19 @@ export async function prepareBusinessJourney(api, workspace, service, sessionId,
   let turn = 1
   let denied = 0
   let granted = 0
-  let picked = 0
   const approvals = (async()=>{
     for await (const frame of service.humanTaskEvents({sessionId},signal)) {
       if (frame.state==='idle') continue
-      if (frame.state==='pick') {
-        if (frame.family!=='project') throw Error('Unexpected resource picker')
-        await service.decideHumanTask({sessionId,requestId:frame.requestId,decision:'select',resourceUrl:frame.browseUrl+'/'+project.id},signal)
-        picked++
-        continue
-      }
-      if (!['task.create','channel.human-member-add'].includes(frame.action)) throw Error('Unexpected approval '+frame.action)
+      if (!['resource.lookup','task.create','channel.human-member-add'].includes(frame.action)) throw Error('Unexpected approval '+frame.action)
       if (frame.state==='reuse') {
         await service.decideHumanTask({sessionId,requestId:frame.requestId,decision:'reuse'},signal)
         continue
       }
       const url=new URL(frame.loginUrl), q=url.searchParams
-      const resources = frame.action==='task.create' ? ['project:'+project.id] : ['channel:'+channelId,'workspace-member:'+colleague.memberId]
+      const resources = frame.action==='resource.lookup' ? ['resource-lookup:project/DSH+project+journey'] : frame.action==='task.create' ? ['project:'+project.id] : ['channel:'+channelId,'workspace-member:'+colleague.memberId]
       assert.deepEqual(q.get('resource_constraints').split(',').sort(),resources.sort())
       assert.equal(q.get('allowed_actions'),frame.action)
-      if (turn===1) {
+      if (turn===1 && frame.action==='task.create') {
         await service.decideHumanTask({sessionId,requestId:frame.requestId,decision:'cancel'},signal)
         denied++
         continue
@@ -65,7 +58,7 @@ export async function prepareBusinessJourney(api, workspace, service, sessionId,
   const call = (action,args) => 'loop-proxy call '+action+' '+JSON.stringify(args)
   const notify = () => call('message.send',{target:'#'+channelSlug,expectedScopeId:channelId,content:'[@'+peerName+'](/mentions/human/'+peer.user.id+') Please review the assigned task.',clientMessageId:'dsh-mention-replay'})
   const calls = [
-    ['loop-proxy actions channel.', 'loop-proxy call project.list '+JSON.stringify({name:project.name}), 'loop-proxy pick project',task],
+    ['loop-proxy actions channel.', 'loop-proxy call project.list '+JSON.stringify({name:project.name}), call('resource.lookup',{type:'project',name:project.name}),task],
     [task,document,call('channel.create',{requestId:'dsh-private-channel',displayName:'DSH collaboration',visibility:'private'}),
       previous => {
         channelId=previous.match(/chn_[a-z0-9]+/u)?.[0]
@@ -81,7 +74,6 @@ export async function prepareBusinessJourney(api, workspace, service, sessionId,
     async retry() {
       if(approvalError)throw approvalError
       assert.equal(denied,1)
-      assert.equal(picked,1)
       const page=await api('POST',root+'/projects/'+project.id+'/tasks/browse',{limit:20})
       assert.equal(page.totalCount,0)
       turn=2
@@ -91,7 +83,7 @@ export async function prepareBusinessJourney(api, workspace, service, sessionId,
       if (!input.tools?.length || step>=calls[turn-1].length) return
       const previous=JSON.stringify(input.messages.findLast(message=>message.role==='tool')?.content ?? '')
       if (turn===1 && step===1) assert.ok(previous.includes('channel.human-member-add') && previous.includes('requiresHumanAuthorization'))
-      if (turn===1 && step===2) assert.ok(previous.includes('loop-proxy pick project') && !previous.includes(project.id))
+      if (turn===1 && step===2) assert.ok(!previous.includes(project.id))
       if (turn===1 && step===3) assert.ok(previous.includes(project.id))
       const next=calls[turn-1][step++]
       const command=typeof next==='function' ? next(previous) : next
@@ -103,7 +95,7 @@ export async function prepareBusinessJourney(api, workspace, service, sessionId,
     async verify() {
       if(approvalError)throw approvalError
       assert.equal(step,calls[turn-1].length)
-      assert.equal(granted,2)
+      assert.equal(granted,3)
       const page = await api('POST',root+'/projects/'+project.id+'/tasks/browse',{limit:20})
       assert.equal(page.totalCount,1)
       assert.equal(page.rows.length,1)

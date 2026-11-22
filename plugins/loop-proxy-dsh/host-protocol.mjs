@@ -589,10 +589,9 @@ export const humanTaskSessionSchema = schema(value => {
   return {sessionId: id(value.sessionId, "sessionId")}
 })
 export const humanTaskDecisionSchema = schema(value => {
-  object(value, "Task authorization", new Set(["sessionId", "requestId", "decision","resourceUrl"]))
-  if (value.decision==="select" && (typeof value.resourceUrl!=="string" || value.resourceUrl.length>2048)) fail("A resource link is required")
-  if (!["reuse", "cancel","select"].includes(value.decision)) fail("Unknown task authorization decision")
-  return {sessionId: id(value.sessionId, "sessionId"), requestId: id(value.requestId, "requestId"), decision: value.decision,...(value.decision==="select"?{resourceUrl:value.resourceUrl}:{})}
+  object(value, "Task authorization", new Set(["sessionId", "requestId", "decision"]))
+  if (!["reuse", "cancel"].includes(value.decision)) fail("Unknown task authorization decision")
+  return {sessionId: id(value.sessionId, "sessionId"), requestId: id(value.requestId, "requestId"), decision: value.decision}
 })
 
 export const humanConnectionSchema = schema(value => {

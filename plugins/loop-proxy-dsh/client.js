@@ -661,10 +661,9 @@ window.__ModuleLoader__.load({
       return { sessionId: id(value.sessionId, "sessionId") };
     });
     var humanTaskDecisionSchema = schema((value) => {
-      object(value, "Task authorization", /* @__PURE__ */ new Set(["sessionId", "requestId", "decision", "resourceUrl"]));
-      if (value.decision === "select" && (typeof value.resourceUrl !== "string" || value.resourceUrl.length > 2048)) fail("A resource link is required");
-      if (!["reuse", "cancel", "select"].includes(value.decision)) fail("Unknown task authorization decision");
-      return { sessionId: id(value.sessionId, "sessionId"), requestId: id(value.requestId, "requestId"), decision: value.decision, ...value.decision === "select" ? { resourceUrl: value.resourceUrl } : {} };
+      object(value, "Task authorization", /* @__PURE__ */ new Set(["sessionId", "requestId", "decision"]));
+      if (!["reuse", "cancel"].includes(value.decision)) fail("Unknown task authorization decision");
+      return { sessionId: id(value.sessionId, "sessionId"), requestId: id(value.requestId, "requestId"), decision: value.decision };
     });
     var humanConnectionSchema = schema((value) => {
       return humanConnection(object(value, "Human connection", /* @__PURE__ */ new Set(["connection"])));
@@ -5047,11 +5046,6 @@ window.__ModuleLoader__.load({
     var NS = "loopProxy";
     var en = {
       "human.title": "Act in my name",
-      "human.pickProject": "Choose a project in Loop",
-      "human.pickKB": "Choose a knowledge base in Loop",
-      "human.pasteLink": "Paste the selected resource link",
-      "human.shareLink": "Use this resource",
-      "human.invalidLink": "Choose a link from this workspace.",
       "human.agentDenied": "I need your approval to continue. My assistant permissions do not cover this action.",
       "human.all": "All resources you can access in this workspace",
       "human.reusable": "Loop will show the expiry before you approve. You can reuse this authorization and revoke it in Loop account settings.",
@@ -5577,11 +5571,6 @@ window.__ModuleLoader__.load({
     };
     var zh = {
       "human.title": "\u4EE5\u6211\u7684\u540D\u4E49\u529E\u7406",
-      "human.pickProject": "\u53BB Loop \u9009\u62E9\u9879\u76EE",
-      "human.pickKB": "\u53BB Loop \u9009\u62E9\u77E5\u8BC6\u5E93",
-      "human.pasteLink": "\u7C98\u8D34\u6240\u9009\u8D44\u6E90\u7684\u94FE\u63A5",
-      "human.shareLink": "\u4F7F\u7528\u8FD9\u4E2A\u8D44\u6E90",
-      "human.invalidLink": "\u8BF7\u9009\u62E9\u5F53\u524D\u5DE5\u4F5C\u533A\u7684\u8D44\u6E90\u94FE\u63A5\u3002",
       "human.agentDenied": "\u52A9\u624B\u7684\u6743\u9650\u4E0D\u8DB3\uFF0C\u7EE7\u7EED\u529E\u7406\u8FD9\u4E00\u6B65\u9700\u8981\u4F60\u6388\u6743\u3002",
       "human.all": "\u6B64\u5DE5\u4F5C\u533A\u5185\u4F60\u6709\u6743\u8BBF\u95EE\u7684\u6240\u6709\u8D44\u6E90",
       "human.reusable": "\u6388\u6743\u53EF\u91CD\u590D\u4F7F\u7528\u3002Loop \u4F1A\u5728\u786E\u8BA4\u524D\u663E\u793A\u5230\u671F\u65F6\u95F4\uFF0C\u4F60\u53EF\u4EE5\u968F\u65F6\u5728 Loop \u8D26\u53F7\u8BBE\u7F6E\u4E2D\u64A4\u9500\u3002",
@@ -6118,11 +6107,6 @@ window.__ModuleLoader__.load({
       "module.capabilities": "\u5C08\u5BB6 \xB7 \u6280\u80FD",
       "module.connectors": "\u9023\u63A5\u5668",
       "human.title": "\u4EE5\u6211\u7684\u540D\u7FA9\u8FA6\u7406",
-      "human.pickProject": "\u5728 Loop \u9078\u64C7\u5C08\u6848",
-      "human.pickKB": "\u5728 Loop \u9078\u64C7\u77E5\u8B58\u5EAB",
-      "human.pasteLink": "\u8CBC\u4E0A\u6240\u9078\u8CC7\u6E90\u7684\u9023\u7D50",
-      "human.shareLink": "\u4F7F\u7528\u6B64\u8CC7\u6E90",
-      "human.invalidLink": "\u8ACB\u9078\u64C7\u76EE\u524D\u5DE5\u4F5C\u5340\u7684\u8CC7\u6E90\u9023\u7D50\u3002",
       "human.agentDenied": "\u52A9\u624B\u7684\u6B0A\u9650\u4E0D\u8DB3\uFF0C\u7E7C\u7E8C\u8FA6\u7406\u9019\u4E00\u6B65\u9700\u8981\u4F60\u6388\u6B0A\u3002",
       "human.all": "\u6B64\u5DE5\u4F5C\u5340\u5167\u4F60\u53EF\u5B58\u53D6\u7684\u6240\u6709\u8CC7\u6E90",
       "human.reusable": "\u6388\u6B0A\u53EF\u91CD\u8907\u4F7F\u7528\u3002Loop \u5C07\u5728\u78BA\u8A8D\u524D\u986F\u793A\u5230\u671F\u6642\u9593\uFF0C\u4E26\u53EF\u96A8\u6642\u5728 Loop \u5E33\u865F\u8A2D\u5B9A\u4E2D\u64A4\u92B7\u3002",
@@ -6327,11 +6311,6 @@ window.__ModuleLoader__.load({
       "module.capabilities": "\u30A8\u30AD\u30B9\u30D1\u30FC\u30C8\u30FB\u30B9\u30AD\u30EB",
       "module.connectors": "\u30B3\u30CD\u30AF\u30BF\u30FC",
       "human.title": "\u81EA\u5206\u306E\u540D\u7FA9\u3067\u5B9F\u884C",
-      "human.pickProject": "Loop \u3067\u30D7\u30ED\u30B8\u30A7\u30AF\u30C8\u3092\u9078\u629E",
-      "human.pickKB": "Loop \u3067\u30CA\u30EC\u30C3\u30B8\u30D9\u30FC\u30B9\u3092\u9078\u629E",
-      "human.pasteLink": "\u9078\u629E\u3057\u305F\u30EA\u30BD\u30FC\u30B9\u306E\u30EA\u30F3\u30AF",
-      "human.shareLink": "\u3053\u306E\u30EA\u30BD\u30FC\u30B9\u3092\u4F7F\u7528",
-      "human.invalidLink": "\u73FE\u5728\u306E\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u306E\u30EA\u30F3\u30AF\u3092\u9078\u3093\u3067\u304F\u3060\u3055\u3044\u3002",
       "human.agentDenied": "\u3053\u306E\u64CD\u4F5C\u306B\u306F\u30A2\u30B7\u30B9\u30BF\u30F3\u30C8\u306E\u6A29\u9650\u304C\u8DB3\u308A\u307E\u305B\u3093\u3002\u7D9A\u3051\u308B\u306B\u306F\u627F\u8A8D\u304C\u5FC5\u8981\u3067\u3059\u3002",
       "human.all": "\u3053\u306E\u30EF\u30FC\u30AF\u30B9\u30DA\u30FC\u30B9\u3067\u30A2\u30AF\u30BB\u30B9\u3067\u304D\u308B\u5168\u30EA\u30BD\u30FC\u30B9",
       "human.reusable": "\u6709\u52B9\u671F\u9650\u306F Loop \u306E\u78BA\u8A8D\u753B\u9762\u306B\u8868\u793A\u3055\u308C\u307E\u3059\u3002\u627F\u8A8D\u306F\u7E70\u308A\u8FD4\u3057\u5229\u7528\u3067\u304D\u3001Loop \u306E\u30A2\u30AB\u30A6\u30F3\u30C8\u8A2D\u5B9A\u3067\u53D6\u308A\u6D88\u305B\u307E\u3059\u3002",
@@ -6972,25 +6951,14 @@ window.__ModuleLoader__.load({
     function HumanTaskPanel({ matched, remote, t }) {
       const { sessionId, frame } = matched;
       const [failure2, setFailure] = (0, import_react5.useState)("");
-      const [resourceUrl, setResourceUrl] = (0, import_react5.useState)("");
       const decide = async (decision) => {
         try {
-          const result = await remote.decideHumanTask?.({ sessionId, requestId: frame.requestId, ...decision === "select" ? { decision, resourceUrl } : { decision } });
+          const result = await remote.decideHumanTask?.({ sessionId, requestId: frame.requestId, decision });
           if (!result?.ok) setFailure(frame.requestId);
         } catch {
           setFailure(frame.requestId);
         }
       };
-      if (frame.state === "pick") return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("section", { className: loop_ui_default.taskConsent, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives5.Button, { onClick: () => openExternal(frame.browseUrl, { protocol: window.location.protocol, open: window.open.bind(window) }), children: t(frame.family === "project" ? "human.pickProject" : "human.pickKB") }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("label", { children: [
-          t("human.pasteLink"),
-          /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("input", { type: "url", value: resourceUrl, onChange: (event) => setResourceUrl(event.target.value) })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives5.Button, { variant: "primary", disabled: !resourceUrl.trim(), onClick: () => void decide("select"), children: t("human.shareLink") }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives5.Button, { onClick: () => void decide("cancel"), children: t("human.cancel") }),
-        failure2 === frame.requestId && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { role: "alert", children: t("human.invalidLink") })
-      ] });
       return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("section", { className: loop_ui_default.taskConsent, "aria-label": t("human.title"), children: [
         frame.agentDenied && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: t("human.agentDenied") }),
         /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("strong", { children: frame.summary }),

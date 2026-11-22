@@ -5,7 +5,7 @@ export const name = "loop-proxy-dsh"
 export const inject = ["tools"]
 
 const SESSION = /^session-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
-const COMMAND = /^loop-proxy (?:(human|human-apps) )?(context|guide|actions|schema|call|authorize|pick)(?: ([A-Za-z0-9_.:-]{1,200}))?(?: (\{[\s\S]*\}|'\{[\s\S]*\}'))?$/
+const COMMAND = /^loop-proxy (?:(human|human-apps) )?(context|guide|actions|schema|call|authorize)(?: ([A-Za-z0-9_.:-]{1,200}))?(?: (\{[\s\S]*\}|'\{[\s\S]*\}'))?$/
 const MAX_INPUT = 1 << 20
 const CALL_TIMEOUT_MS = 125_000
 
@@ -20,10 +20,6 @@ export function parseCommand(command, onInvalid = () => {}) {
   const principal = mode ? {principal: "human", connection: mode === "human-apps" ? "apps" : "business"} : {}
   // A matched outer quote pair is transport syntax, never shell evaluation.
   const input = encodedInput.startsWith("'") ? encodedInput.slice(1, -1) : encodedInput
-  if (verb === "pick") {
-    if (mode || input || !["project","kb"].includes(name)) return reject("Choose a supported Loop resource.", "Use loop-proxy pick project or loop-proxy pick kb.")
-    return {verb,name,input}
-  }
   if (verb === "context") return name || input ? reject("context takes no arguments.", "Use loop-proxy context.") : {verb, name, input}
   if (verb === "authorize" && !mode) return reject("Task authorization requires explicit Human mode.", "Use the Agent connection for normal work.")
   if (verb !== "actions" && !name) return reject(`${verb} requires a name.`, `Use loop-proxy ${verb} <${verb === "guide" ? "topic" : "actionId"}>${verb === "call" ? " <JSON object>" : ""}.`)

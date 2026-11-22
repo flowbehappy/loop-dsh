@@ -850,6 +850,7 @@ export class LoopCollaborationRuntime {
     // Pin the user input and exact participant set for the turn. Concurrent
     // callers share one attempt; only its directory/status preflight may be read again.
     let readOnlyPreflight = true
+    let step = "checking the session connection"
     const attempt = {input, key, route: previous?.route}
     const promise = this.withSessionContext(sessionId, signal, async (context, connection, readMembers) => {
       assertCurrent()
@@ -858,6 +859,7 @@ export class LoopCollaborationRuntime {
         throw failure("loop-collaboration/binding-stale", "The original Session connection or channel changed; a new user instruction is required")
       }
       attempt.route = route
+      step = "looking up the selected agents"
       const targets = []
       for (const targetId of args.targetIds) {
         const directory = await this.directory({sessionId, query: targetId, limit: MAX_DIRECTORY_LIMIT}, signal)
@@ -877,11 +879,13 @@ export class LoopCollaborationRuntime {
           agentId: text(entry.agentId, 200), mention: text(entry.mention, 512), displayName: text(entry.displayName, 512), intendedActions: ["dispatch", "followup", "cancel", "review", "end-management"]})
       }
       if (!context.defaultChannelId) throw failure("loop-collaboration/not-bound", "This Session has no authorized channel for collaboration")
+      step = "checking channel membership"
       const missing = await missingChannelAgents(context.defaultChannelId, targets, readMembers, assertCurrent)
       if (missing.length) {
         return {state: "not-in-channel", channelId: context.defaultChannelId, missing,
           nextStep: "These Agents can be mentioned but cannot receive a Task in this channel yet. Explain who is missing. If inviting them would serve the request, ask the user before sharing the channel unless already authorized. After the exact invitation, retry preparation to verify membership."}
       }
+      step = "checking the collaboration binding"
       let status = await this.call("collaborationStatus", {sessionId}, signal)
       // From here bind or activation may have committed even on an error.
       readOnlyPreflight = false
@@ -892,6 +896,7 @@ export class LoopCollaborationRuntime {
         }
         // Reuse the exact saved channel; no model-supplied project, account,
         // credentials, share scope or Session identity enters this operation.
+        step = "binding the session to its saved channel"
         const bound = await this.bind({sessionId, workspaceId: context.loopWorkspaceId,
           boardId: context.defaultChannelId, coordinatorAgentId: context.agent.id,
           shareScope: {scope: "task-description", resourceRefs: [], expandedAudience: false}}, signal, input, attempt)
@@ -909,6 +914,7 @@ export class LoopCollaborationRuntime {
       this.bound.set(sessionId, true)
       assertCurrent()
       const accepted = this.acceptanceEvidence(sessionId, input.message)
+      step = "preparing the selected collaborators"
       const prepared = await this.prepareIntent({sessionId,
         serializedText: accepted.acceptedText, targets,
         bindingRevision: status.scope.bindingRevision,
@@ -930,6 +936,11 @@ export class LoopCollaborationRuntime {
       return {state: "ready", targets, channelId: context.defaultChannelId,
         projectId: text(context.projectId, 200), shareScope: "task-description",
         nextStep: "The selected Agents were found in the saved channel. Verify any required sharing authorization, then dispatch the requested Task. Loop will check task access at dispatch. No Task or invitation has been sent."}
+    }).catch(error => {
+      if (error?.code === "loop-host/waiting-for-access" || error?.status === 403) {
+        throw failure(error.code ?? "loop-host/waiting-for-access", `Loop denied access while ${step}. No task was dispatched. ${error.message}`)
+      }
+      throw error
     })
     attempt.promise = promise
     this.targetPreparations.set(sessionId, attempt)
@@ -2177,7 +2188,7 @@ export class LoopCollaborationRuntime {
 
     register({
       name: "collaboration_dispatch",
-      description: "When the user explicitly asks, create and track exactly one Loop Task for the selected colleague or Agent, with results returned to this Session. Supply tasks: [{title, description, assignee}], using the exact directory memberId. This dispatch uses the session’s bound channel. When the user names a destination channel, use loop_channel_task with that name and assignee instead. For a task owned directly by a named project, resolve project.list by name and call task.create with projectId and assignee together. Preserve the requested target and assignee on failure. Verify channel membership and complete any authorized Agent invitation first. A mention alone does not authorize a Task. An unknown dispatch outcome must be recovered through the original operation; never switch to task.create.",
+      description: "When the user explicitly asks, create and track exactly one Loop Task for the selected colleague or Agent, with results returned to this Session. Supply tasks: [{title, description, assignee}], using the exact directory memberId. This dispatch uses the session’s bound channel. When the user names a destination channel, use loop_channel_task with that name and assignee instead. For a task owned directly by a named project, resolve its name using resource.lookup (request owner consent when needed). Use project.grant-member for missing project membership, then task.create with projectId and assignee together. Preserve the requested target and assignee on failure. Verify channel membership and complete any authorized Agent invitation first. A mention alone does not authorize a Task. An unknown dispatch outcome must be recovered through the original operation; never switch to task.create.",
       parameters: dispatchToolParameters(),
       async execute(args, exec) {
         const task = validateDispatchTasks(args)

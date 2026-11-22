@@ -504,10 +504,6 @@ export default class LoopHostService extends TypertRemoteService {
   async agentCommand(sessionId, command, signal, description) {
     if (command.name === "task.create" && command.verb === "call") this.collaboration.checkDispatchRetry(sessionId,command,true)
     const message = this.humanTasks.current(sessionId)
-    if (command.verb === "pick") {
-      const selected = await this.humanTasks.pick(sessionId,message,command.name,signal)
-      return {failed:false,output:JSON.stringify(selected)}
-    }
     checkDocumentShare(command,message,this.runtime.serviceBaseUrl)
     if (command.verb === "call" && ["message.send","message.history"].includes(command.name) && requestsHumanIdentity(message)) {
       const args = JSON.parse(command.input)

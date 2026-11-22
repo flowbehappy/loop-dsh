@@ -1,5 +1,9 @@
 # Memory and files
 
+When a named resource is missing from the Agent’s list, call `resource.lookup`
+with its type and name. Loop can request the owner’s approval for that search.
+Use `project.grant-member` for an Agent that needs project access.
+
 Discover `loop-proxy actions memory.` or `loop-proxy actions drive.`, describe the
 chosen action, then pass its parameters directly to `loop-proxy call <actionId>`.
 

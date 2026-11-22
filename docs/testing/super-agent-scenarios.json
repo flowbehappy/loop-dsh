@@ -42,7 +42,7 @@
         "LOOP_TS_E2E_BUSINESS": "1"
       },
       "coverage": [
-        "project selection",
+        "project discovery by name with scoped resource.lookup consent",
         "decline and reassign",
         "knowledge document creation",
         "private channel creation",
@@ -65,7 +65,8 @@
         "unknown/ambiguous/denied/canceled lookup",
         "scope substitution rejection",
         "repeat resolution without grant cache",
-        "real OAuth and canonical message readback"
+        "real OAuth and canonical message readback",
+        "project membership for ordinary and Super Agents, assigned task feedback, project resource unlink, direct selection and revocation"
       ]
     },
     {

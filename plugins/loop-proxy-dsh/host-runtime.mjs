@@ -1837,16 +1837,6 @@ export class LoopHostRuntime {
       if (result === null || typeof result !== "object" || (!Object.hasOwn(result, "data") && !result.error)) {
         throw failure("loop-host/backend-invalid", "Loop Agent action result is invalid")
       }
-      const args = JSON.parse(command.input)
-      const data = result.data?.data
-      const family = command.name === "project.list" ? "project" : command.name === "kb.list" ? "kb" : undefined
-      const rows = family === "project" ? data?.projects : data?.knowledgeBases
-      if (family && prepareDelegation && typeof args.name === "string" && args.name.trim() &&
-          Array.isArray(rows) && rows.length === 0 && !data?.hasMore && !args.cursor) {
-        return {failed:false,output:boundedJSON({...result,scope:"current_agent",next:{
-          command:"loop-proxy pick "+family, description:"For a user-requested target, ask the user to choose one resource from their own Loop workspace. Only the chosen reference enters this conversation."
-        }})}
-      }
       const webUrl = !result.error && resultWebUrl(command.name, result.data?.data, this.serviceBaseUrl, loopWorkspaceId)
       return {
         failed: Boolean(result.error),

@@ -54,8 +54,11 @@ export class HostAPI {
         const code = ({400:"invalid-request",422:"invalid-request",401:"needs-auth",403:"waiting-for-access",404:"target-unavailable",409:"conflict",429:"rate-limited"} as Record<number,string>)[response.status] ?? "backend-unavailable"
         // Some tool surfaces retain only the message. Use the bounded local
         // classification, never a server body, credential, URL or target ID.
-        const hint = code === "invalid-request" && path === "/collaboration/actions/dispatch"
-          ? ". Verify the requested board and assignee membership. Keep the assignee and destination when correcting this request." : ""
+        let hint = ""
+        if (path === "/collaboration/actions/dispatch") {
+          if (code === "invalid-request") hint = ". Verify the requested board and assignee membership. Keep the assignee and destination when correcting this request."
+          if (code === "waiting-for-access") hint = ". Loop denied the dispatch and returned no acceptance receipt. Check the bound channel and the coordinator and assignee memberships. Reconcile any earlier uncertain attempt through its original operation."
+        }
         throw new LoopError("loop-host/" + code, `Loop Host request was rejected (HTTP ${response.status}; ${code})`+hint, response.status)
       }
       if (response.status === 204) { await response.body?.cancel(); return undefined }

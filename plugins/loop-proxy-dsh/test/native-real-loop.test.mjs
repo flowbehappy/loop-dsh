@@ -246,6 +246,10 @@ for(const failure of ['none','create-response','execute-response','model-respons
     const workerDirectory = await facade.collaborationDirectory({sessionId,query:agentName,kinds:['agent']})
     const workerTarget = workerDirectory.entries.find(entry => entry.agentId === worker.id)
     assert.ok(workerTarget)
+    await t.test('project lookup, scoped agent grants, assigned poem, worker document and revocation',async()=>{
+      const {verifyProjectResourceJourney}=await import('./project-resource-journey.mjs')
+      await verifyProjectResourceJourney({api,facade,base,workspace,assistant,assistantMember:device.agent.memberId,worker,workerMember:workerTarget.memberId,sessionId})
+    })
     await assert.rejects(facade.agentAction({workspaceId:'token-managed',sessionId,name:'task.create',
       arguments:{channelName:publicRoom.name,tasks:[{title:'Out-of-channel assignment',assignee:workerTarget.memberId}]}}),
       error => error.status === 400 && /assignee|member/i.test(error.message))
