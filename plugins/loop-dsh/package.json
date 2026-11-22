@@ -1,0 +1,40 @@
+{
+  "name": "@pingkai/dsh-loop-sync",
+  "version": "0.2.0",
+  "description": "Opt-in visible Human/Agent conversation sync from official DeepSeek Harness into Loop",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/gate.js",
+    "lib/label.js",
+    "lib/map.js",
+    "lib/scope.js",
+    "lib/config.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "license": "Proprietary",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-session-telemetry": ">=0.2.2-rc.1 <0.3.0",
+    "@deepseek-ai/schemastery": "~3.18.5"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check lib/index.js && node --check lib/gate.js && node --check lib/map.js && node --check lib/scope.js && node --check lib/config.js"
+  }
+}

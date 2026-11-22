@@ -1,0 +1,14 @@
+{
+  "name": "loop-dsh",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "bootstrap": "npm ci --prefix plugins/loop-proxy-dsh",
+    "test": "npm --prefix plugins/loop-proxy-dsh test && npm --prefix plugins/loop-dsh test",
+    "check": "npm --prefix plugins/loop-proxy-dsh run check && npm --prefix plugins/loop-dsh run check",
+    "build:client": "npm --prefix plugins/loop-proxy-dsh run build:client"
+  }
+}
