@@ -4,10 +4,10 @@
 
 ## 安装和登录
 
-1. **下载安装 DSH 桌面端。** 在 [DeepSeek Harness 官网](https://deepseek.com/harness/)选择「下载桌面端」，或直接使用下面的官方下载链接。已有兼容版本（`>=0.2.2-rc.1`）可跳到第 2 步。
-   - [macOS（Apple 芯片）](https://download.deepseek.com/desktop/dsh-latest-macos-arm64.dmg)：打开 `.dmg`，将 DeepSeek Harness 拖入「应用程序」，然后打开它。
-   - [Windows（64 位 x64）](https://download.deepseek.com/desktop/dsh-latest-windows-x64.exe)：运行 `.exe`，按提示安装，然后打开 DeepSeek Harness。
-2. **下载 Loop 插件。** [下载 loop-dsh.tgz](https://github.com/flowbehappy/loop-dsh/releases/latest/download/loop-dsh.tgz)，保留原文件，无需解压。
+1. **下载安装 DSH 桌面端。** 在 [DeepSeek Harness 官网](https://deepseek.com/harness/)选择「下载桌面端」，按操作系统下载安装包。已有兼容版本（`>=0.2.2-rc.1`）可跳到第 2 步。
+   - macOS（Apple 芯片）：打开 `.dmg`，将 DeepSeek Harness 拖入「应用程序」，然后打开它。
+   - Windows（64 位 x64）：运行 `.exe`，按提示安装，然后打开 DeepSeek Harness。
+2. **下载 Loop 插件。** 前往 [Loop 插件发布页](https://github.com/flowbehappy/loop-dsh/releases)，选择标有 **Latest** 的版本，在 **Assets** 下下载 `loop-dsh.tgz`，无需解压。
 3. **安装插件。** 打开 DSH 的「插件 → 添加插件 → 安装第三方插件」，在「包名或地址」中填入下载文件的绝对路径，确认安装。若提示 `koffi` 需要运行安装脚本，核对包名后选择「允许这些脚本并重试」。按 DSH 提示重启。
 4. **登录 Loop。** 从 DSH 左下角「更多 → 登录」进入，填入团队的 Loop 服务地址（例如 `https://loop.pingkai.cn`），选择工作区，在浏览器完成登录和授权，然后回到 DSH。
 
