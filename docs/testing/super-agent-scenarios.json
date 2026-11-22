@@ -72,6 +72,7 @@
     {
       "id": "live-topic-cooperation",
       "level": "real-model-dsh-and-loop-agent-runtimes",
+      "loopWebRegression": "web/e2e/projectTaskAssignee.spec.ts — create a second workspace by name, follow the empty member search to its directory, create an agent on a connected host and grant the selected member after returning.",
       "automation": "plugins/loop-proxy-dsh/test/native-dsh-runtime.test.mjs",
       "fixture": "plugins/loop-proxy-dsh/test/live-topic-cooperation.mjs",
       "environment": {
@@ -79,6 +80,7 @@
       },
       "preconditions": "Two independent DSH sessions with the same assistant and two participating Loop Agents in a private channel, a second Human and their guest Agent, plus a nonmember. Supply a dedicated DeepSeek test credential.",
       "checks": {
+        "fresh-workspaces": "Create a second Loop workspace for the same owner and a second DSH working folder after sign-in. Verify the old workspace musician is absent, then dispatch to the new workspace musician with the same name and read back its delivery.",
         "topic-mentions": "Both topics target both selected Agent IDs in Loop delivery diagnostics.",
         "cross-owner": "A second Human accepts a workspace invite, enrolls their own guest Agent and contributes in the topic. Loop rejects enrollment by the other owner. Verify the guest receives the mention and the author uses the peer feedback.",
         "cross-review": "The editor quotes the author’s draft reference and the author quotes the editor’s review in the revision. Check all authors against persisted member IDs.",

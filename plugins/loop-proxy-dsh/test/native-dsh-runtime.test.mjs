@@ -112,7 +112,10 @@ export async function apply(ctx){
    await trace("upstream-start");upstream.listen(0,'127.0.0.1');await once(upstream,'listening')
    ctx.effect(()=>()=>{upstream.closeAllConnections();upstream.close()})
    await trace("model-profile");await api('POST','/api/v1/me/model-profiles',{displayName:'Isolated native model',model:'native-test-model',models:['native-test-model'],baseUrl:'http://127.0.0.1:'+upstream.address().port+'/v1',apiKey:'isolated-model-key',wireApi:'openai',verifiedWireApis:['openai']})
-   await trace("workspace");const workspace=(await api('GET','/api/v1/workspaces'))[0].id
+   await trace("workspace");const initialWorkspace=(await api('GET','/api/v1/workspaces'))[0].id
+   const topicFixture=${JSON.stringify(method==='browser' && liveTopic)} ? await import(${JSON.stringify(new URL('./live-topic-cooperation.mjs',import.meta.url).href)}) : null
+   const freshWorkspace=topicFixture ? await topicFixture.prepareFreshLoopWorkspace(api,initialWorkspace) : null
+   const workspace=freshWorkspace?.id ?? initialWorkspace
    const actions=ctx.loopHostActions
    const hostRuntime=ctx.loopHostService.runtime
    await hostRuntime.configureGlobalServer({serverUrl:base})
@@ -196,10 +199,9 @@ export async function apply(ctx){
      result.channelScenarios=channelJourney.scenarios.length
      channelJourney=undefined
    }
-   if(method==="browser" && process.env.LOOP_TS_E2E_LIVE_TOPIC==="1"){
-     const {liveTopicProvider,runLiveTopic}=await import(${JSON.stringify(new URL('./live-topic-cooperation.mjs',import.meta.url).href)})
-     topicProvider=await liveTopicProvider()
-     result.topic=await runLiveTopic({ctx,api,base,workspace,localWorkspace,sessionId:result.session.sessionId,provider:topicProvider,trace,selectedModel:{provider:group.id,model:model.id}})
+   if(topicFixture){
+     topicProvider=await topicFixture.liveTopicProvider()
+     result.topic=await topicFixture.runLiveTopic({ctx,api,base,workspace,localWorkspace,oldMusicianId:freshWorkspace.oldMusicianId,sessionId:result.session.sessionId,provider:topicProvider,trace,selectedModel:{provider:group.id,model:model.id}})
    }
    await trace('sync-receipt')
    let uploaded

@@ -39,11 +39,30 @@ async function fixture(t) {
     async setSync(input) { uploaded.push(input); return {state: 'on', pending: 0, historyPartial: false} },
     async syncStatus() { return {state: 'on', pending: 0, historyPartial: false} },
   }
-  const runtime = new LoopHostRuntime({store, actions, workspaces: {list: () => [workspace], get: id => id === workspace.id ? workspace : undefined}, sessions: {get: id => sessions.get(id)}, accountPrincipal: 'human', defaultServiceBaseUrl: server})
+  const folders = new Map([[workspace.id, workspace]])
+  const runtime = new LoopHostRuntime({store, actions, workspaces: {list: () => [...folders.values()], get: id => folders.get(id)}, sessions: {get: id => sessions.get(id)}, accountPrincipal: 'human', defaultServiceBaseUrl: server})
   await runtime.waitForActions()
   await runtime.syncProjects({}, undefined, {background: true})
-  return {root, store, workspace, sessions, prepared, uploaded, actions, runtime}
+  return {root, store, workspace, folders, sessions, prepared, uploaded, actions, runtime}
 }
+
+test('enabling sync in a folder opened after login resolves its own route once', async t => {
+  const {runtime, folders, sessions, prepared, uploaded, root, workspace} = await fixture(t)
+  const folder = {id: 'second', path: join(root, 'second'), title: 'Second', sessionIds: ['second-session']}
+  folders.set(folder.id, folder)
+  sessions.set('second-session', {id: 'second-session', header: {createdAt: Date.now()}})
+  const request = {workspaceId: folder.id, sessionId: 'second-session', enabled: true}
+  const preparedBefore = prepared.length
+  await runtime.syncStatus(request)
+  await assert.rejects(runtime.setSync({...request, workspaceId: workspace.id}), /does not belong/)
+  assert.equal(prepared.length, preparedBefore)
+  for (let attempt = 0; attempt < 2; attempt++) {
+    assert.equal((await runtime.setSync(request)).sync.state, 'on')
+  }
+  assert.equal(prepared.length, preparedBefore + 1)
+  assert.equal(prepared.at(-1).workspace.workspaceId, folder.id)
+  assert.equal(uploaded.at(-1).sessionId, request.sessionId)
+})
 
 test('workspace discovery keeps a bound project without creating a recording channel', async t => {
   const {runtime,store,workspace,prepared,sessions,actions} = await fixture(t)

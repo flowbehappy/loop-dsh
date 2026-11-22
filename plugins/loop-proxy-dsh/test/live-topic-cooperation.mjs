@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { serializeCollaborationReference } from '../client/ui/collaboration-reference.ts'
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { mkdtemp, readFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -85,12 +86,28 @@ async function inviteColleague(api, root, tag) {
   return { user: account.user, api: peerAPI }
 }
 
+// A new local DSH folder and a new Loop workspace have independent identities.
+export async function prepareFreshLoopWorkspace(api, originalWorkspaceId) {
+  const original = '/api/v1/workspaces/' + originalWorkspaceId
+  const organization = await api('GET', original + '/organization')
+  const { machine } = await api('POST', original + '/machines', { name: 'Original studio' })
+  const musician = await api('POST', original + '/agents', {
+    machineId: machine.id, runtime: 'codex', name: 'wan_imac_ds_001'
+  })
+  const workspace = await api('POST', '/api/v1/workspaces', {
+    organizationId: organization.id, name: 'New music studio', slug: 'studio-' + randomUUID().slice(0, 8)
+  })
+  assert.notEqual(workspace.id, originalWorkspaceId)
+  return { id: workspace.id, oldMusicianId: musician.id }
+}
+
 export async function runLiveTopic({
   ctx,
   api,
   base,
   workspace,
   localWorkspace,
+  oldMusicianId,
   sessionId,
   provider,
   trace,
@@ -177,15 +194,21 @@ export async function runLiveTopic({
   }
   const a = await directory(reviewer, sessionId),
     b = await directory(editor, sessionId)
-  const other = await ctx.sessionController.create({
-    workspaceId: localWorkspace.id
+  const freshFolder = await mkdtemp(join(dirname(process.cwd()), 'second-studio-'))
+  const secondWorkspace = await ctx.workspaceRegistry.create(freshFolder, 'Second studio')
+  assert.notEqual(secondWorkspace.id, localWorkspace.id)
+  const other = await ctx.sessionController.create({ workspaceId: secondWorkspace.id })
+  const beforeEnrollment = await ctx.loopHostActions.collaborationDirectory({
+    sessionId: other.sessionId, query: 'wan_imac_ds_001', kinds: ['agent']
   })
+  assert.equal(beforeEnrollment.entries.some(entry =>
+    entry.agentId === oldMusicianId || entry.displayName === 'wan_imac_ds_001'), false)
   await ctx.sessionController.selectModel({
     sessionId: other.sessionId,
     ...selectedModel
   })
   await ctx.loopHostService.runtime.setSync({
-    workspaceId: localWorkspace.id,
+    workspaceId: secondWorkspace.id,
     sessionId: other.sessionId,
     enabled: true
   })
@@ -223,7 +246,7 @@ export async function runLiveTopic({
       },
       AbortSignal.timeout(20000)
     )
-    async function discussion(forSession, excludeRoot) {
+    async function discussion(forSession, workspaceId, excludeRoot) {
       const thread = await until('manager did not open a separate topic in the named channel', async () => {
         const p = await page(channel.id)
         for (const [rootId, row] of Object.entries(p.replyThreadSummaries ?? {})) {
@@ -247,7 +270,7 @@ export async function runLiveTopic({
         )
       }
       const reopened = await ctx.loopHostActions.agentAction({
-        workspaceId: localWorkspace.id,
+        workspaceId,
         sessionId: forSession,
         name: 'message.thread-create',
         arguments: { target: parent, messageId: thread.rootId }
@@ -255,7 +278,7 @@ export async function runLiveTopic({
       assert.equal(reopened.data.data.threadChannelId, thread.id)
       return { ...thread, question, target: reopened.data.data.target }
     }
-    const thread = await discussion(sessionId)
+    const thread = await discussion(sessionId, localWorkspace.id)
     const { target, question } = thread
     const otherA = await directory(reviewer, other.sessionId),
       otherB = await directory(editor, other.sessionId)
@@ -275,7 +298,7 @@ export async function runLiveTopic({
       },
       AbortSignal.timeout(20000)
     )
-    const sibling = await discussion(other.sessionId, thread.rootId)
+    const sibling = await discussion(other.sessionId, secondWorkspace.id, thread.rootId)
     assert.notEqual(sibling.target, target)
     await trace('worker identities read and respond in topic')
     async function turn(w, instruction, mustRead, marker, replyTarget = target) {
@@ -358,7 +381,7 @@ export async function runLiveTopic({
       reviewer,
       '你是作者，请原样引用编辑消息末尾括号内的 B- 复核号，然后按编辑意见给出改过的两行，说明两人复核已完成。',
       critique.content,
-      final
+      `最终交付号：${final}`
     )
     assert.ok(done.content.includes(review), 'author did not cite ' + review + ' in ' + done.content)
     const replay = await reviewer.send(done)
@@ -415,7 +438,7 @@ export async function runLiveTopic({
       ctx,
       api,
       root,
-      localWorkspace,
+      localWorkspace: secondWorkspace,
       selectedModel,
       worker,
       directory,
@@ -427,6 +450,8 @@ export async function runLiveTopic({
       threadId: thread.id,
       sessionId,
       siblingId: sibling.id,
+      workspaceId: workspace,
+      localWorkspaceIds: [localWorkspace.id, secondWorkspace.id],
       otherSession: other.sessionId,
       ...music,
       replyCount: 5,
@@ -443,6 +468,7 @@ export async function runLiveTopic({
         'coordinator-summary',
         'removed-member',
         'overlapping-topics',
+        'fresh-workspaces',
         'default-task',
         'task-feedback'
       ]

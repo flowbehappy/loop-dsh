@@ -55,4 +55,6 @@ LOOP_TS_E2E_LIVE_TOPIC=1 LOOP_TEST_MODEL_FILE=/absolute/path/to/test-key \
   node --test --test-name-pattern=browser plugins/loop-proxy-dsh/test/native-dsh-runtime.test.mjs
 ```
 
+同一账号新建第二个 Loop 工作区，登录后再打开一个空的 DSH 工作目录。原工作区与新工作区使用同名作曲智能体，按服务端身份核对目录、任务和回信所属会话。
+
 服务提供方为 DeepSeek，默认模型为 `deepseek-v4-flash`，可通过 `LOOP_TEST_MODEL_NAME` 指定模型。凭据文件须只含测试密钥。Loop 账号中只保存临时测试入口的凭据。写诗派工、项目成员授权及知识库撤权由上面的 `native-real-loop.test.mjs` 覆盖。

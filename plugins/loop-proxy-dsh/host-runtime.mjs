@@ -1352,7 +1352,12 @@ export class LoopHostRuntime {
 
   async setSyncLocked(request, signal) {
     await this.requireAccount()
-    const context = await this.sessionContextLocked(request)
+    let context = await this.sessionContextLocked(request)
+    if (request.enabled && context.state === "unbound") {
+      await this.ensureSessionContextLocked(request.sessionId, signal)
+      // Upload needs the original consent revision even when actions can resume.
+      context = await this.sessionContextLocked(request)
+    }
     if (context.state !== "inherited") throw failure("loop-host/conflict", context.reason ?? "The Session is not bound")
     if (this.actions?.setSync === undefined) {
       throw failure("loop-host/backend-unavailable", "Host sync is not installed")
