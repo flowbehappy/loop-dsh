@@ -76,6 +76,23 @@ export default class LoopHostService extends TypertRemoteService {
       current: id => this.collaboration.currentUserInputs.get(id)?.message,
       request: (...args) => this.runtime.humanConnectionRequest(...args),
     })
+    this.channelReads = new WeakSet()
+    ctx.tools.register(defineTool({
+      name:"loop_channel_history",
+      description:"Read and summarize the conversation in a named Loop channel. Pass the user's literal channel name or #slug. Resolves the directory, asks for single-channel read access when needed, and returns the verified channel's messages.",
+      parameters:{
+        channelName:{type:"string",required:true,description:"Exact display name or #slug from the user."},
+        limit:{type:"integer",description:"Number of recent messages (1–100)."},
+      },
+      output:{schema:{type:"string"},render:(_args,value)=>[{type:"text",text:value}]},
+      execute:async (args,exec) => {
+        const sessionId = exec.agent?.session?.id
+        if (!sessionId || !this.humanTasks.current(sessionId)) throw new Error("A current user request is required.")
+        const result = await this.agentCommand(sessionId,{verb:"call",name:"message.history",input:JSON.stringify(args)},exec.signal)
+        if (result.failed) throw new Error(result.output)
+        return result.output
+      },
+    }),{when:({agent})=>this.canUseAgentActions() && !this.collaboration.isFeedbackTurn(agent?.session?.id)})
     ctx.effect(() => this.runtime.addSessionInvalidationListener(ids => {
       for (const id of ids) this.collaboration.clearSessionActivation(id)
     }), "loop-proxy-dsh-host: invalidate collaboration intents")
@@ -391,6 +408,7 @@ export default class LoopHostService extends TypertRemoteService {
   humanCommand(sessionId, command, signal) {
     if (command.name === "task.create" && command.verb === "call") this.collaboration.checkDispatchRetry(sessionId,command)
     if (command.verb === "authorize") return this.humanTasks.authorize(sessionId, command, signal)
+    this.checkChannelRead(this.humanTasks.current(sessionId),command)
     const task = this.humanTasks.forCommand(sessionId, command)
     return this.runtime.humanCommand(sessionId, command, signal, () => this.humanTasks.current(sessionId) === task.message, task.grant)
   }
@@ -410,11 +428,44 @@ export default class LoopHostService extends TypertRemoteService {
       const selected = await this.humanTasks.pick(sessionId,message,command.name,signal)
       return {failed:false,output:JSON.stringify(selected)}
     }
-    const result = await this.runtime.agentCommand(sessionId, command, signal, this.humanTasks.canOffer(message))
-    if (!result.delegation) return result
-    const grant = await this.humanTasks.offer(sessionId, message, result.owner, result.delegation, description, signal, command.input)
-    return this.runtime.humanCommand(sessionId, {...command,principal:"human",connection:grant.policy.connection}, signal,
-      () => this.humanTasks.current(sessionId) === message, grant)
+    this.checkChannelRead(message,command)
+    const args = command.verb === "call" && command.name === "message.history" ? JSON.parse(command.input) : {}
+    const named = message && (typeof args.channelName === "string" || /^#[a-z0-9][a-z0-9-]*$/u.test(args.target))
+    // A display-name lookup can suspend at consent. Keep concurrent fallback
+    // reads out of this user turn while the named read is pending or failed.
+    if (named && args.channelName) this.channelReads.add(message)
+    try {
+      const result = await this.runtime.agentCommand(sessionId, command, signal, this.humanTasks.canOffer(message))
+      if (named && this.humanTasks.current(sessionId) !== message) throw new Error("The originating user request changed.")
+      if (!result.delegation) {
+        if (named && result.failed) this.channelReads.add(message)
+        else if (named && args.channelName) this.channelReads.delete(message)
+        return result
+      }
+      if (named) this.channelReads.add(message)
+      const input = result.delegationArguments ? JSON.stringify(result.delegationArguments) : command.input
+      const summary = result.channelLabel ? "Read channel history: "+result.channelLabel : description
+      const grant = await this.humanTasks.offer(sessionId, message, result.owner, result.delegation, summary, signal, input)
+      const response = await this.runtime.humanCommand(sessionId, {...command,input,principal:"human",connection:grant.policy.connection}, signal,
+        () => this.humanTasks.current(sessionId) === message, grant)
+      if (named && !response.failed) {
+        const expected = result.delegationArguments?.target
+        if (expected && "channel:"+JSON.parse(response.output)?.data?.data?.targetKey !== expected) {
+          throw new Error("Loop did not return history for the authorized channel.")
+        }
+        this.channelReads.delete(message)
+      }
+      return response
+    } catch (error) {
+      if (named) this.channelReads.add(message)
+      throw error
+    }
+  }
+
+  checkChannelRead(message,command) {
+    if (command.verb === "call" && ["message.history","message.get","message.search"].includes(command.name) && this.channelReads.has(message)) {
+      throw new Error("The named channel read is pending or could not finish. Stop here and ask the user before reading another channel.")
+    }
   }
 
   async remote(signal, operation) {
