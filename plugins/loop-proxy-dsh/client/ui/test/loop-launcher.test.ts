@@ -43,7 +43,7 @@ test('the native sidebar keeps Tasks and exposes other Loop modules through More
     /slots\.inject\('sidebar\.panellist\.actions'[\s\S]*name: 'sidebar\.panellist\.actions'[\s\S]*LoopMoreMenu/u,
   )
   assert.match(panels, /module\.placement === 'more'/u)
-  assert.match(panels, /onDismiss\(\)[\s\S]*openModule\(module\.id\)/u)
+  assert.match(panels, /onDismiss\(\)[\s\S]*openModule\(module\.id,/u)
   assert.match(clientEntry, /inject: \(\): LoopMoreMenuInjected => \(\{openModule: selectLoopModule\}\)/u)
 })
 

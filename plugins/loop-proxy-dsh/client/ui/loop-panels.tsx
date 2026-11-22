@@ -30,7 +30,7 @@ type MoreProps = PropsRuntime<'sidebar.panellist.actions'>
   & InjectFace<LoopMoreMenuInjected>
 
 export interface LoopMoreMenuInjected {
-  readonly openModule: (panelId: string) => void
+  readonly openModule: (panelId: string, destination: 'home' | 'resume') => void
 }
 
 export function loopModuleIcon(moduleId: string, size = 16): ReactNode {
@@ -94,7 +94,7 @@ export function LoopMoreMenu({
         onSelect={() => {
           onDismiss()
           // The host's onOpen only resolves resident sidebar entries.
-          openModule(module.id)
+          openModule(module.id, activePanelId === module.id ? 'home' : 'resume')
         }}
       >
         {t(module.label)}

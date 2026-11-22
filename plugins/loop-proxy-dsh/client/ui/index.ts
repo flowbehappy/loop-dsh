@@ -133,9 +133,9 @@ export function applyLoopUi(ctx: ClientContext, remote: LoopHostClient): void {
       open: (target, name) => window.open(target, name),
     })
   }
-  const selectLoopModule = (panelId: string): void => {
+  const selectLoopModule: LoopMoreMenuInjected['openModule'] = (panelId, destination) => {
     ctx.layout.selectPanel(panelId as MainPanelId)
-    void globalPage.openModule(panelId)
+    void globalPage.openModule(panelId, destination)
   }
   const globalPage = new LoopGlobalPageController(remote, {
     onRoute: (panelId, _path) => {
@@ -160,7 +160,7 @@ export function applyLoopUi(ctx: ClientContext, remote: LoopHostClient): void {
     'loop-proxy: embedded page locale',
   )
   const openLoopModules = () => {
-    selectLoopModule(LOOP_PROJECTS_PANEL_ID)
+    selectLoopModule(LOOP_PROJECTS_PANEL_ID, 'resume')
   }
   const skills = new LoopSkillRuntime({
     remote,

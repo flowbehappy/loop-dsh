@@ -4431,12 +4431,16 @@ window.__ModuleLoader__.load({
         return true;
       }
       /** Select one native module and synchronize the persistent Loop iframe. */
-      async openModule(panelId) {
+      async openModule(panelId, destination = "resume") {
         const module2 = loopModuleForPanel(panelId);
         if (module2 === null) return;
         if (this.store.getSnapshot().screen !== "ready") await this.open();
         const rememberedPath = this.modulePaths.get(panelId);
-        let targetPath = rememberedPath !== void 0 && loopPanelForPath(rememberedPath) === panelId ? rememberedPath : module2.path;
+        let targetPath = module2.path;
+        if (rememberedPath !== void 0 && loopPanelForPath(rememberedPath) === panelId) {
+          const workspacePrefix = rememberedPath.match(/^\/w\/[^/?#]+(?=\/)/u)?.[0] ?? "";
+          targetPath = destination === "home" ? workspacePrefix + module2.path : rememberedPath;
+        }
         this.pendingProjectsNavigation = false;
         if (targetPath === "/projects") {
           const workspaceId = this.store.getSnapshot().loopWorkspaceId;
@@ -6906,7 +6910,7 @@ window.__ModuleLoader__.load({
           current: activePanelId === module2.id,
           onSelect: () => {
             onDismiss();
-            openModule(module2.id);
+            openModule(module2.id, activePanelId === module2.id ? "home" : "resume");
           },
           children: t(module2.label)
         },
@@ -9228,9 +9232,9 @@ window.__ModuleLoader__.load({
           open: (target, name2) => window.open(target, name2)
         });
       };
-      const selectLoopModule = (panelId) => {
+      const selectLoopModule = (panelId, destination) => {
         ctx.layout.selectPanel(panelId);
-        void globalPage.openModule(panelId);
+        void globalPage.openModule(panelId, destination);
       };
       const globalPage = new LoopGlobalPageController(remote, {
         onRoute: (panelId, _path) => {
@@ -9256,7 +9260,7 @@ window.__ModuleLoader__.load({
         "loop-proxy: embedded page locale"
       );
       const openLoopModules = () => {
-        selectLoopModule(LOOP_PROJECTS_PANEL_ID);
+        selectLoopModule(LOOP_PROJECTS_PANEL_ID, "resume");
       };
       const skills = new LoopSkillRuntime({
         remote,

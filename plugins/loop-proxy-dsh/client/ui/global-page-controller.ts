@@ -324,15 +324,17 @@ export class LoopGlobalPageController {
   }
 
   /** Select one native module and synchronize the persistent Loop iframe. */
-  async openModule(panelId: string): Promise<void> {
+  async openModule(panelId: string, destination: 'resume' | 'home' = 'resume'): Promise<void> {
     const module = loopModuleForPanel(panelId)
     if (module === null) return
     if (this.store.getSnapshot().screen !== 'ready') await this.open()
     const rememberedPath = this.modulePaths.get(panelId)
-    let targetPath = rememberedPath !== undefined &&
-        loopPanelForPath(rememberedPath) === panelId
-      ? rememberedPath
-      : module.path
+    let targetPath = module.path
+    if (rememberedPath !== undefined && loopPanelForPath(rememberedPath) === panelId) {
+      // Deep links can name a workspace before the Host remembers its selection.
+      const workspacePrefix = rememberedPath.match(/^\/w\/[^/?#]+(?=\/)/u)?.[0] ?? ''
+      targetPath = destination === 'home' ? workspacePrefix + module.path : rememberedPath
+    }
     this.pendingProjectsNavigation = false
     if (targetPath === '/projects') {
       const workspaceId = this.store.getSnapshot().loopWorkspaceId
