@@ -134,6 +134,8 @@
         },
         {
           "prompt": "帮我找 {agent}，在「{project}」这个项目里写首春天的小诗。写好了让我看看。",
+          "followUp": "也把 {agent} 加到这个项目里当普通成员吧，下回还要找它。",
+          "followUpCheck": "Read the membership table before and after the follow-up. Verify the requested worker and ordinary role. Count each new or reused authorization prompt and any turn the user must restart.",
           "verify": "Record every user interruption verbatim. Check the project, assignee, membership and final poem against Loop. Count who actually contributed and whether the user had to copy a link or ID."
         },
         {
