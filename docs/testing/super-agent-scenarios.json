@@ -141,6 +141,16 @@
         {
           "prompt": "让 {author} 和 {reviewer} 一起给周一早上的闹钟想句台词吧，一个先出主意，另一个挑挑毛病，商量好给我一句。",
           "verify": "Both named workers contribute in the same discussion. Match the draft, critique, author confirmation and the line sent back to the original DSH conversation."
+        },
+        {
+          "prompt": "帮我查一下「{project}」的项目编号。",
+          "setup": "Revoke the dedicated test lookup grant first. Keep the assistant outside the project and use a fresh DSH conversation.",
+          "verify": "The named lookup matches the project visible to the owner. Record any request for a broader directory, whether the name is legible and what the assistant does if the user declines."
+        },
+        {
+          "prompt": "在「{channel}」频道里帮我找那条带“闹钟”的消息，我想看原话。",
+          "setup": "Post a known message in a dedicated private test channel and verify the text in Loop first.",
+          "verify": "Match the original text and author. Record whether the user has an actionable confirmation if access is missing, and whether they are asked to find or paste the message themselves."
         }
       ],
       "method": "Give the prompt verbatim with no workflow hints. Record first-attempt results before retries. If a normal confirmation appears, record what it covers; interventions or hints are reported separately."
