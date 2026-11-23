@@ -159,6 +159,22 @@
         {
           "prompt": "把我名下的全部 Loop 资源按类型列出来，带上名称和 ID。",
           "verify": "Place a project outside assistant membership. Verify the owner directory includes it, handles pagination, and any whole-directory consent follows this explicit request."
+        },
+        {
+          "prompt": "我有个叫「{knowledgeBase}」的知识库，帮我找一下它的 ID。",
+          "setup": "Use a knowledge base owned by the user and deselected for the assistant.",
+          "verify": "Return the canonical ID with a lookup limited to the named knowledge base."
+        },
+        {
+          "prompt": "在 #{channel} 里给消息 {messageId} 点个 👍。",
+          "followUp": "把刚才点的 👍 撤掉。",
+          "setup": "The parent message is written by another channel member and is hidden from the private assistant. Disable full-text search.",
+          "verify": "The owner grants only the exact message for the reaction. Read back one reaction after adding it and zero after removal."
+        },
+        {
+          "prompt": "找到 #{channel} 里提到“周四的回归窗口”的那条消息，只在那条消息的讨论串里回复“窗口确认”。",
+          "setup": "Run once with an assistant-visible parent and again with a parent visible only to the Human. Pre-create the reply thread.",
+          "verify": "Check the reply in the actual thread and zero copies in the parent timeline. Record a visibility or unsupported-action block separately. An answer alone is insufficient."
         }
       ],
       "method": "Give the prompt verbatim with no workflow hints. Record first-attempt results before retries. If a normal confirmation appears, record what it covers; interventions or hints are reported separately."
