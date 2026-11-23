@@ -108,7 +108,7 @@ export class LoopBackend {
   oauthCallbackBroker() {
     return this.worksite?.client.status().state==="connected"?this.worksite.client:undefined
   }
-  beginLogin(signal?: AbortSignal, accessToken?:string): Promise<{challengeId: string; authorizationURL: string}> {
+  beginLogin(signal?: AbortSignal, accessToken?:string, recoveryWorkspace?:string): Promise<{challengeId: string; authorizationURL: string}> {
     const combined = this.active(signal)
     const previous = this.loginQueue
     const setup = this.track(() => previous.then(async () => {
@@ -117,7 +117,9 @@ export class LoopBackend {
       // One pending consent per runtime prevents a late login replacing a newer one.
       for (const {login} of this.logins.values()) login.cancel()
       await Promise.allSettled([...this.logins.values()].map(value => value.completion))
-      const login = await beginHostLogin({...this.options, accessToken, signal: combined,...(this.worksite?.client.status().state==="connected"?{callbackBroker:this.worksite.client}:{})})
+      const current=!accessToken&&recoveryWorkspace?await this.store(recoveryWorkspace).read():undefined
+      const recovery=current?.refresh_state==="unknown"&&current.device_credential?current:undefined
+      const login = await beginHostLogin({...this.options, accessToken, recovery, signal: combined,...(this.worksite?.client.status().state==="connected"?{callbackBroker:this.worksite.client}:{})})
       const challengeId = randomUUID()
       const completion = this.track(async () => {
         const {credential} = await login.result
@@ -212,7 +214,11 @@ export class LoopBackend {
       const tokens = new TokenManager(this.store(workspace), credential, {fetch:this.options.fetch})
       try { return await new AccountService(new HostAPI(tokens, this.options.fetch), this.options.installation, this.options.pageOrigin).status(combined) }
       catch (error) {
-        if (error instanceof LoopError && error.code === "loop-host/needs-auth") return {state:"needs_auth", accountPrincipal:credential.principal_id, workspaceId:workspace}
+        if (error instanceof LoopError && error.code === "loop-host/needs-auth") {
+          const current=await this.store(workspace).read()
+          return {state:"needs_auth", accountPrincipal:credential.principal_id, workspaceId:workspace,
+            ...(current?.generation===credential.generation&&current.refresh_state==="unknown"?{reason:"refresh_outcome_unknown"}:{})}
+        }
         throw error
       }
     })

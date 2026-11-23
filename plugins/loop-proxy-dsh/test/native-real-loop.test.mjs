@@ -21,7 +21,7 @@ import {SyncOutbox} from '../backend/sync.ts'
 const base=process.env.LOOP_TS_E2E_BASE_URL
 // This endpoint must be an explicitly supplied isolated Test Hub. The suite
 // does not start databases, infer daily configuration, or use saved accounts.
-for(const failure of ['none','create-response','execute-response','model-response','access-token'])test('real Loop headless journey including disconnect: '+failure, {skip:!base,timeout:120_000},async t=>{
+for(const failure of ['none','create-response','execute-response','model-response','access-token','refresh-recovery'])test('real Loop headless journey including disconnect: '+failure, {skip:!base,timeout:120_000},async t=>{
   const {NativeHostActions}=await import(process.env.LOOP_TS_E2E_BUNDLE==='1'?'../backend/dist/adapter.mjs':'../backend/adapter.ts')
   assert.ok(['127.0.0.1','localhost'].includes(new URL(base).hostname),'isolated loopback server required')
   const root=await mkdtemp(tmpdir()+'/loop-ts-real-e2e-')
@@ -65,8 +65,9 @@ for(const failure of ['none','create-response','execute-response','model-respons
     }
     return response
   }
+  const helpers=[]
   const facade=createLoopHostActions({stateHome:root+'/actions',serviceBaseUrl:base,loopWorkspaceId:workspace,installationId:installation,pageOrigin,syncProfile:'e2e'},
-    {createHelper:config=>new NativeHostActions(config,{provider:ctx.get('credentials'),syncHome:root+'/sync',fetch:nativeFetch})})
+    {createHelper:config=>{const helper=new NativeHostActions(config,{provider:ctx.get('credentials'),syncHome:root+'/sync',fetch:nativeFetch});helpers.push(helper);return helper}})
   t.after(()=>facade.dispose())
   if(failure==='access-token'){
     const settingsPath='/api/v1/me/personal-assistants/'+workspace
@@ -420,6 +421,51 @@ for(const failure of ['none','create-response','execute-response','model-respons
   assert.equal((await facade.collaborationWatch({sessionId:'session-native'})).watching,true)
   for(let i=0;i<300&&!collaborationEvents.some(message=>message.event.status?.state==='live');i++)await delay(10)
   assert.ok(collaborationEvents.some(message=>message.event.status?.state==='live'),'real collaboration stream becomes live')
+  if(failure==='refresh-recovery'){
+    await facade.skillCatalogWatch({workspaceId:'local-workspace'})
+    const original=await store.read()
+    // Loop rotates successfully but the Host loses the response, as during sleep.
+    const rotation=await fetch(original.token_endpoint,{method:'POST',body:new URLSearchParams({grant_type:'refresh_token',refresh_token:original.refresh_token,client_id:original.client_id,resource:original.resource})})
+    assert.equal(rotation.status,200);await rotation.body.cancel()
+    await store.modify(async current=>({...current,refresh_state:'unknown',refresh_operation:'simulated-lost-response',refresh_started_at:0,access_expires_at:new Date(0).toISOString()}))
+    const liveCount=()=>collaborationEvents.filter(e=>e.event.status?.state==='live').length
+    const previousLive=liveCount()
+    // Fault injection closes only this test's sockets, leaving their watch
+    // owners intact to exercise normal retry after same-authority recovery.
+    for(const helper of helpers){
+      for(const entry of helper.backend.collaborationWatches.values())entry.watch.stream?.close()
+    }
+    const status=await facade.accountStatus({})
+    assert.equal(status.reason,'refresh_outcome_unknown')
+    const pending=await facade.connectAccount({})
+    const url=new URL(pending.challenge.loginUrl)
+    assert.equal(url.pathname,'/external-host/page-reauthorize','unknown refresh uses original-grant recovery, not replacement OAuth')
+    const login=await fetch(base+'/api/v1/auth/login',{method:'POST',headers:{'Content-Type':'application/json','X-Loop-Browser-Session':'cookie',Origin:base},body:JSON.stringify({email:registered.user.email,password})})
+    assert.equal(login.status,200)
+    const cookie=login.headers.getSetCookie().map(c=>c.split(';')[0]).join('; ')
+    await login.body.cancel()
+    const approved=await fetch(base+'/api/v1/auth/external-host/credential-recoveries/confirm',{method:'POST',headers:{'Content-Type':'application/json','X-Loop-Browser-Session':'cookie',Origin:base,Cookie:cookie},body:JSON.stringify(Object.fromEntries(new URLSearchParams(url.hash.slice(1))))})
+    assert.equal(approved.status,200)
+    const redirect=new URL((await approved.json()).redirectTo)
+    const body=redirect.hash.slice(1);redirect.hash=''
+    const callback=await fetch(redirect,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body})
+    assert.equal(callback.status,200);await callback.body.cancel()
+    for(let i=0;i<100;i++){if((await facade.connectAccount({})).state==='connected')break;await delay(20)}
+    const restored=await store.read()
+    for(const key of ['generation','grant_id','client_id','device_credential','principal_id','workspace_id'])assert.equal(restored[key],original[key],key)
+    assert.equal(restored.refresh_state,undefined)
+    assert.notEqual(restored.refresh_token,original.refresh_token)
+    assert.equal((await hostIdentity.device(store)).bindingId,device.bindingId)
+    // The existing owners see the recovered token; no watch creation call.
+    assert.equal((await facade.collaborationStatus({sessionId:'session-native'})).scope.bindingId,collaboration.scope.bindingId)
+    assert.equal((await account.status()).state,'signed_in')
+    for(let i=0;i<400&&liveCount()===previousLive;i++)await delay(100)
+    assert.ok(liveCount()>previousLive,'the existing collaboration owner resumes after recovery')
+    await facade.disconnectAccount({})
+    assert.equal(await store.read(),undefined)
+    t.diagnostic('Lost real refresh response recovered by Human confirmation with original grant, device, generation and collaboration binding preserved')
+    return
+  }
   const directory=await facade.collaborationDirectory({sessionId:'session-native',limit:20})
   assert.ok(Array.isArray(directory.entries))
   const selected=directory.entries.find(entry=>entry.notifiable)

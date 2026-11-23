@@ -1213,6 +1213,8 @@ window.__ModuleLoader__.load({
           return t("error.credentialUnavailable");
         case "loop-host/timeout":
           return t("error.timeout");
+        case "loop-host/recovery-unavailable":
+          return t("error.recoveryUnavailable");
         case "loop-host/login-discovery":
           return t("error.loginDiscovery");
         case "loop/server-url-invalid":
@@ -5080,7 +5082,8 @@ window.__ModuleLoader__.load({
       "login.checking": "Checking sign-in status\u2026",
       "login.signedIn": "Signed in",
       "login.signedOut": "Not signed in",
-      "login.expired": "Sign-in expired. Please sign in again.",
+      "login.expired": "Sign-in needs verification. Please sign in again.",
+      "login.refreshUncertain": "Sign-in renewal could not be confirmed. Confirm recovery to restore this connection.",
       "login.statusUnavailable": "Sign-in status unavailable",
       "login.signingIn": "Sign-in in progress",
       "login.signingOut": "Sign-out in progress",
@@ -5420,6 +5423,7 @@ window.__ModuleLoader__.load({
       "error.backendUnavailable": "The Loop service is unavailable. Check Settings \u2192 Loop and the server connection, then try again.",
       "error.timeout": "Loop took too long to respond. Check the server connection in Settings \u2192 Loop, then try again.",
       "error.loginDiscovery": "This address returned a web page for the login service. Check your team\u2019s Loop server address.",
+      "error.recoveryUnavailable": "This connection cannot be recovered. Sign out, then sign in again. Existing sessions cannot resume automatically.",
       "error.serverUrl": "Enter a full HTTPS address. Local services can use HTTP.",
       "error.workspaceRequired": "Open a Loop module, choose the Loop workspace once, then connect this project.",
       "error.hostUpdate": "Update the Loop plugin and try again.",
@@ -5605,7 +5609,8 @@ window.__ModuleLoader__.load({
       "login.checking": "\u6B63\u5728\u68C0\u67E5\u767B\u5F55\u72B6\u6001\u2026",
       "login.signedIn": "\u5DF2\u767B\u5F55",
       "login.signedOut": "\u672A\u767B\u5F55",
-      "login.expired": "\u767B\u5F55\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55",
+      "login.expired": "\u767B\u5F55\u72B6\u6001\u9700\u8981\u91CD\u65B0\u9A8C\u8BC1\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55",
+      "login.refreshUncertain": "\u767B\u5F55\u7EED\u671F\u7ED3\u679C\u672A\u80FD\u786E\u8BA4\uFF0C\u8BF7\u786E\u8BA4\u6062\u590D\u8FDE\u63A5",
       "login.statusUnavailable": "\u6682\u65F6\u65E0\u6CD5\u83B7\u53D6\u767B\u5F55\u72B6\u6001",
       "login.signingIn": "\u6B63\u5728\u767B\u5F55",
       "login.signingOut": "\u6B63\u5728\u9000\u51FA\u767B\u5F55",
@@ -5945,6 +5950,7 @@ window.__ModuleLoader__.load({
       "error.backendUnavailable": "Loop \u670D\u52A1\u6682\u4E0D\u53EF\u7528\u3002\u8BF7\u68C0\u67E5\u201C\u8BBE\u7F6E \u2192 Loop\u201D\u548C\u670D\u52A1\u5668\u8FDE\u63A5\u540E\u91CD\u8BD5\u3002",
       "error.timeout": "Loop \u54CD\u5E94\u8D85\u65F6\u3002\u8BF7\u68C0\u67E5\u201C\u8BBE\u7F6E \u2192 Loop\u201D\u4E2D\u7684\u670D\u52A1\u5668\u8FDE\u63A5\u540E\u91CD\u8BD5\u3002",
       "error.loginDiscovery": "\u8FD9\u4E2A\u5730\u5740\u7684\u767B\u5F55\u63A5\u53E3\u8FD4\u56DE\u4E86\u7F51\u9875\u3002\u8BF7\u6838\u5BF9\u56E2\u961F\u63D0\u4F9B\u7684 Loop \u670D\u52A1\u5730\u5740\u3002",
+      "error.recoveryUnavailable": "\u539F\u8FDE\u63A5\u65E0\u6CD5\u6062\u590D\uFF0C\u8BF7\u5148\u9000\u51FA\u518D\u91CD\u65B0\u767B\u5F55\u3002\u65E7\u4F1A\u8BDD\u65E0\u6CD5\u81EA\u52A8\u63A5\u7EED\u3002",
       "error.serverUrl": "\u8BF7\u8F93\u5165\u5B8C\u6574\u7684 HTTPS \u7F51\u5740\uFF1B\u672C\u673A\u670D\u52A1\u53EF\u4F7F\u7528 HTTP\u3002",
       "error.workspaceRequired": "\u8BF7\u6253\u5F00\u4EFB\u4E00 Loop \u6A21\u5757\uFF0C\u5B8C\u6210\u4E00\u6B21 Loop \u5DE5\u4F5C\u533A\u9009\u62E9\uFF0C\u518D\u8FDE\u63A5\u6B64\u9879\u76EE\u3002",
       "error.hostUpdate": "\u8BF7\u66F4\u65B0 Loop \u63D2\u4EF6\u540E\u91CD\u8BD5\u3002",
@@ -6099,6 +6105,7 @@ window.__ModuleLoader__.load({
     };
     var zhTW = {
       ...zh,
+      "error.recoveryUnavailable": "\u539F\u9023\u7DDA\u7121\u6CD5\u6062\u5FA9\uFF0C\u8ACB\u5148\u767B\u51FA\u518D\u91CD\u65B0\u767B\u5165\u3002\u820A\u5DE5\u4F5C\u968E\u6BB5\u7121\u6CD5\u81EA\u52D5\u63A5\u7E8C\u3002",
       "module.inbox": "\u6536\u4EF6\u7BB1",
       "module.contacts": "\u901A\u8A0A\u9304",
       "module.tasks": "\u4EFB\u52D9",
@@ -6141,7 +6148,8 @@ window.__ModuleLoader__.load({
       "login.checking": "\u6B63\u5728\u6AA2\u67E5\u767B\u5165\u72C0\u614B\u2026",
       "login.signedIn": "\u5DF2\u767B\u5165",
       "login.signedOut": "\u5C1A\u672A\u767B\u5165",
-      "login.expired": "\u767B\u5165\u5DF2\u904E\u671F\uFF0C\u8ACB\u91CD\u65B0\u767B\u5165",
+      "login.expired": "\u767B\u5165\u72C0\u614B\u9700\u8981\u91CD\u65B0\u9A57\u8B49\uFF0C\u8ACB\u91CD\u65B0\u767B\u5165",
+      "login.refreshUncertain": "\u7121\u6CD5\u78BA\u8A8D\u767B\u5165\u7E8C\u671F\u7D50\u679C\uFF0C\u8ACB\u78BA\u8A8D\u6062\u5FA9\u9023\u7DDA",
       "login.statusUnavailable": "\u66AB\u6642\u7121\u6CD5\u53D6\u5F97\u767B\u5165\u72C0\u614B",
       "login.signingIn": "\u6B63\u5728\u767B\u5165",
       "login.signingOut": "\u6B63\u5728\u767B\u51FA",
@@ -6303,6 +6311,7 @@ window.__ModuleLoader__.load({
     };
     var ja = {
       ...en,
+      "error.recoveryUnavailable": "\u3053\u306E\u63A5\u7D9A\u306F\u5FA9\u5143\u3067\u304D\u307E\u305B\u3093\u3002\u4E00\u5EA6\u30B5\u30A4\u30F3\u30A2\u30A6\u30C8\u3057\u3066\u304B\u3089\u518D\u5EA6\u30B5\u30A4\u30F3\u30A4\u30F3\u3057\u3066\u304F\u3060\u3055\u3044\u3002\u4EE5\u524D\u306E\u30BB\u30C3\u30B7\u30E7\u30F3\u306F\u81EA\u52D5\u518D\u958B\u3067\u304D\u307E\u305B\u3093\u3002",
       "module.inbox": "\u53D7\u4FE1\u30C8\u30EC\u30A4",
       "module.contacts": "\u9023\u7D61\u5148",
       "module.tasks": "\u30BF\u30B9\u30AF",
@@ -6345,7 +6354,8 @@ window.__ModuleLoader__.load({
       "login.checking": "\u30ED\u30B0\u30A4\u30F3\u72B6\u614B\u3092\u78BA\u8A8D\u4E2D\u2026",
       "login.signedIn": "\u30ED\u30B0\u30A4\u30F3\u6E08\u307F",
       "login.signedOut": "\u672A\u30ED\u30B0\u30A4\u30F3",
-      "login.expired": "\u30ED\u30B0\u30A4\u30F3\u306E\u6709\u52B9\u671F\u9650\u304C\u5207\u308C\u307E\u3057\u305F\u3002\u518D\u5EA6\u30ED\u30B0\u30A4\u30F3\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      "login.expired": "\u30ED\u30B0\u30A4\u30F3\u72B6\u614B\u306E\u518D\u78BA\u8A8D\u304C\u5FC5\u8981\u3067\u3059\u3002\u518D\u5EA6\u30ED\u30B0\u30A4\u30F3\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
+      "login.refreshUncertain": "\u30ED\u30B0\u30A4\u30F3\u306E\u66F4\u65B0\u7D50\u679C\u3092\u78BA\u8A8D\u3067\u304D\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u63A5\u7D9A\u306E\u5FA9\u5143\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002",
       "login.statusUnavailable": "\u30ED\u30B0\u30A4\u30F3\u72B6\u614B\u3092\u53D6\u5F97\u3067\u304D\u307E\u305B\u3093",
       "login.signingIn": "\u30ED\u30B0\u30A4\u30F3\u4E2D",
       "login.signingOut": "\u30ED\u30B0\u30A2\u30A6\u30C8\u4E2D",
@@ -7278,7 +7288,7 @@ window.__ModuleLoader__.load({
       const authenticating = ["waiting", "connecting", "recovering"].includes(connection.phase);
       const canRecover = connection.error?.code === "loop-host/credential-unavailable" && page.serverUrl !== null && normalizedLoopServerUrl(page.serverDraft)?.replace(/\/+$/u, "") === normalizedLoopServerUrl(page.serverUrl)?.replace(/\/+$/u, "");
       const error = page.serverError ?? (sync.disconnecting ? sync.error : null) ?? connection.error;
-      const status = sync.disconnecting ? "login.signingOut" : loading ? "login.checking" : authenticating ? "login.signingIn" : page.connection?.state === "unavailable" ? "login.statusUnavailable" : signedIn ? "login.signedIn" : page.connection?.state === "needs_auth" ? "login.expired" : "login.signedOut";
+      const status = sync.disconnecting ? "login.signingOut" : loading ? "login.checking" : authenticating ? "login.signingIn" : page.connection?.state === "unavailable" ? "login.statusUnavailable" : signedIn ? "login.signedIn" : page.connection?.state === "needs_auth" ? page.connection.reason === "refresh_outcome_unknown" ? "login.refreshUncertain" : "login.expired" : "login.signedOut";
       const logoutLabel = sync.disconnecting ? sync.challenge !== null ? sync.challengeOpened ? "settings.disconnectCheck" : "settings.disconnectConfirm" : "settings.disconnectFinish" : "login.logout";
       return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives6.Modal, { open: true, title: t("login.title"), closeLabel: t("dialog.close"), className: loop_ui_default.loginDialog, onClose: dialog.close, children: /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("form", { className: loop_ui_default.loginForm, noValidate: true, onSubmit: (event) => {
         event.preventDefault();

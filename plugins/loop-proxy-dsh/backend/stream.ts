@@ -3,6 +3,11 @@ import {TokenManager} from "./http.ts"
 import {parseWire,stringifyWire} from "./codec.ts"
 import {LoopError,requireActive} from "./errors.ts"
 
+// Both Loop streams send a heartbeat every 25 seconds. Allow several missed
+// beats, but do not trust OPEN after sleep or a silent network change.
+const RECEIVE_TIMEOUT_MS=90_000
+const LIVENESS_CHECK_MS=15_000
+
 /** Bounded authenticated stream with no redirect or credential-bearing URL. */
 export class ProtectedStream {
   private socket:WebSocket
@@ -12,25 +17,38 @@ export class ProtectedStream {
   private signal?:AbortSignal
   private abort:()=>void
   private opened:Promise<void>
+  private lastReceivedAt=0
+  private liveness?:ReturnType<typeof setInterval>
   constructor(url:URL,headers:Record<string,string>,signal?:AbortSignal){
     requireActive(signal);this.signal=signal
     this.socket=new WebSocket(url,{headers,followRedirects:false,handshakeTimeout:20_000,maxPayload:2<<20,perMessageDeflate:false})
     this.abort=()=>this.close()
     signal?.addEventListener("abort",this.abort,{once:true})
     this.opened=new Promise((resolve,reject)=>{
-      this.socket.once("open",resolve)
+      this.socket.once("open",()=>{
+        if(this.failure){this.socket.terminate();reject(this.failure);return}
+        this.lastReceivedAt=Date.now()
+        this.liveness=setInterval(()=>this.checkLiveness(),LIVENESS_CHECK_MS)
+        this.liveness.unref()
+        resolve()
+      })
       this.socket.once("error",()=>reject(new LoopError("loop-host/backend-unavailable","Loop stream connection failed")))
       this.socket.once("close",()=>reject(new LoopError("loop-host/backend-unavailable","Loop stream closed before opening")))
     })
     void this.opened.catch(()=>{})
     this.socket.on("message",(bytes,binary)=>{
+      if(this.failure)return
       try{
         if(binary)throw new Error("binary frame")
         const value=parseWire(bytes.toString())
+        this.lastReceivedAt=Date.now()
         if(this.reader){const reader=this.reader;this.reader=undefined;reader.resolve(value)}
         else{if(this.queue.length>=64)throw new Error("queue budget");this.queue.push(value)}
       }catch{this.end(new LoopError("loop-host/backend-invalid","Invalid or excessive Loop stream frames"));this.socket.terminate()}
     })
+    // Control frames arrive even when the application consumer is busy.
+    this.socket.on("ping",()=>{if(!this.failure)this.lastReceivedAt=Date.now()})
+    this.socket.on("pong",()=>{if(!this.failure)this.lastReceivedAt=Date.now()})
     this.socket.on("error",()=>this.end(new LoopError("loop-host/backend-unavailable","Loop stream failed")))
     this.socket.once("close",()=>{signal?.removeEventListener("abort",this.abort);this.end(new LoopError("loop-host/backend-unavailable","Loop stream closed"))})
   }
@@ -45,10 +63,18 @@ export class ProtectedStream {
     const stream=new ProtectedStream(url,headers,signal)
     try{await stream.opened;requireActive(signal);return stream}catch(error){stream.close();throw error}
   }
-  get connected(){return !this.failure&&this.socket.readyState===WebSocket.OPEN}
-  private end(error:LoopError){this.failure??=error;this.reader?.reject(this.failure);this.reader=undefined}
+  private stale(){const elapsed=Date.now()-this.lastReceivedAt;return elapsed<0||elapsed>=RECEIVE_TIMEOUT_MS}
+  private checkLiveness(){
+    if(!this.failure&&this.socket.readyState===WebSocket.OPEN&&this.stale()){
+      this.end(new LoopError("loop-host/backend-unavailable","Loop stream heartbeat timed out"))
+      this.socket.terminate()
+    }
+  }
+  get connected(){return !this.failure&&this.socket.readyState===WebSocket.OPEN&&!this.stale()}
+  private end(error:LoopError){clearInterval(this.liveness);this.liveness=undefined;this.failure??=error;this.reader?.reject(this.failure);this.reader=undefined}
   async read():Promise<any>{
     requireActive(this.signal)
+    this.checkLiveness()
     if(this.failure)throw this.failure
     if(this.queue.length)return this.queue.shift()
     if(this.reader)throw new LoopError("loop-host/conflict","Concurrent stream readers are not supported")

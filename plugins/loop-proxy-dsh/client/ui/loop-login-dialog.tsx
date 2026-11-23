@@ -54,7 +54,8 @@ export function LoopLoginDialog({useLoginDialog, useGlobalPage, useProjectSync, 
     : loading ? 'login.checking'
       : authenticating ? 'login.signingIn'
         : page.connection?.state === 'unavailable' ? 'login.statusUnavailable'
-          : signedIn ? 'login.signedIn' : page.connection?.state === 'needs_auth' ? 'login.expired' : 'login.signedOut'
+          : signedIn ? 'login.signedIn' : page.connection?.state === 'needs_auth'
+            ? page.connection.reason === 'refresh_outcome_unknown' ? 'login.refreshUncertain' : 'login.expired' : 'login.signedOut'
   const logoutLabel: LoopKey = sync.disconnecting
     ? sync.challenge !== null
       ? sync.challengeOpened ? 'settings.disconnectCheck' : 'settings.disconnectConfirm'
