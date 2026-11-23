@@ -335,6 +335,96 @@ test('unknown refresh response survives restart and never replays rotating token
   assert.equal(calls, 1)
 })
 
+test('cancelling a turn after refresh was sent preserves the rotated login for other callers and restart', async t => {
+  let entered, release, calls = 0
+  const ready = new Promise(resolve => entered = resolve), gate = new Promise(resolve => release = resolve)
+  t.after(() => release())
+  const f = await fixture(t, async (req, res) => {
+    for await (const _ of req) {}
+    calls++; entered(); await gate; res.end(JSON.stringify(tokenResponse))
+  })
+  const initial = await f.credentials.publish({...f.value, access_expires_at: new Date(0).toISOString()})
+  const control = new AbortController()
+  const first = new TokenManager(f.credentials, initial).credential(control.signal)
+  const cancelled = assert.rejects(first, {code:'loop-host/cancelled'})
+  await ready; control.abort()
+  const secondStore = await f.store()
+  const second = new TokenManager(secondStore, initial).credential()
+  release(); await cancelled
+  assert.equal((await second).access_token, tokenResponse.access_token)
+  assert.equal((await new TokenManager(await f.store(), initial).credential()).refresh_state, undefined)
+  assert.equal(calls, 1)
+})
+
+test('cancellation between refresh claim and send does not poison the credential', async t => {
+  let calls = 0
+  const f = await fixture(t, (_req, res) => {calls++; res.end(JSON.stringify(tokenResponse))})
+  const initial = await f.credentials.publish({...f.value, access_expires_at:new Date(0).toISOString()})
+  const control = new AbortController(), modify = f.credentials.modify.bind(f.credentials)
+  let mutations = 0
+  f.credentials.modify = async mutate => {
+    const result = await modify(mutate)
+    if (++mutations === 1) control.abort()
+    return result
+  }
+  await assert.rejects(new TokenManager(f.credentials, initial).credential(control.signal), {code:'loop-host/cancelled'})
+  assert.equal(calls, 0)
+  assert.equal((await f.credentials.read()).refresh_state, undefined)
+  assert.equal((await new TokenManager(await f.store(), initial).credential()).access_token, tokenResponse.access_token)
+  assert.equal(calls, 1)
+})
+
+test('connection refusal during offline wake can retry the same login after network recovery and restart', async t => {
+  let calls = 0
+  const f = await fixture(t, (_req, res) => {calls++; res.end(JSON.stringify(tokenResponse))})
+  const unused = createServer(); unused.listen(0, '127.0.0.1'); await once(unused, 'listening')
+  const offlineURL = `http://127.0.0.1:${unused.address().port}/token`
+  await new Promise(resolve => unused.close(resolve))
+  const initial = await f.credentials.publish({...f.value, access_expires_at:new Date(0).toISOString()})
+  await assert.rejects(new TokenManager(f.credentials, initial, {fetch:(_url, init)=>fetch(offlineURL, init)}).credential(), {code:'loop-host/backend-unavailable'})
+  assert.deepEqual(await f.credentials.read(), initial)
+  assert.equal((await new TokenManager(await f.store(), initial).credential()).access_token, tokenResponse.access_token)
+  assert.equal(calls, 1)
+})
+
+test('only proven pre-send failures are retryable; resets and mixed connection errors retain uncertainty', async t => {
+  const f = await fixture(t)
+  const cause = code => Object.assign(new Error('synthetic network failure'), {code})
+  for (const [error, retryable] of [
+    ...['ENOTFOUND','EAI_AGAIN','ENETUNREACH','EHOSTUNREACH','UND_ERR_CONNECT_TIMEOUT'].map(code=>[new TypeError('fetch failed',{cause:cause(code)}),true]),
+    [new TypeError('fetch failed',{cause:new AggregateError([cause('ECONNREFUSED'),cause('ENETUNREACH')])}),true],
+    ...['ECONNRESET','ETIMEDOUT','UND_ERR_SOCKET','UND_ERR_HEADERS_TIMEOUT'].map(code=>[new TypeError('fetch failed',{cause:cause(code)}),false]),
+    [new TypeError('fetch failed',{cause:new AggregateError([cause('ECONNREFUSED'),cause('ECONNRESET')])}),false],
+  ]) {
+    let calls = 0
+    const initial = await f.credentials.publish({...f.value, access_expires_at:new Date(0).toISOString()})
+    const manager = new TokenManager(f.credentials, initial, {fetch:async()=>{calls++; throw error}})
+    await assert.rejects(manager.credential(), {code:retryable?'loop-host/backend-unavailable':'loop-host/needs-auth'})
+    assert.equal((await f.credentials.read()).refresh_state, retryable?undefined:'unknown')
+    if (!retryable) {await assert.rejects(manager.credential(), {code:'loop-host/needs-auth'}); assert.equal(calls,1)}
+  }
+})
+
+test('a sleep-sized clock jump while another caller owns refresh is transient, not a logout', async t => {
+  const f = await fixture(t, (_req,res)=>res.end(JSON.stringify(tokenResponse)))
+  let now = Date.now(), entered, release
+  const ready = new Promise(resolve=>entered=resolve), gate = new Promise(resolve=>release=resolve)
+  t.after(()=>release())
+  const initial = await f.credentials.publish({...f.value, access_expires_at:new Date(0).toISOString()})
+  const modify = f.credentials.modify.bind(f.credentials)
+  let mutations = 0
+  f.credentials.modify = async mutate => {
+    const result = await modify(mutate)
+    if (++mutations === 1) {entered(); await gate}
+    return result
+  }
+  const first = new TokenManager(f.credentials, initial, {now:()=>now}).credential()
+  await ready; now += 30 * 60_000
+  await assert.rejects(new TokenManager(await f.store(), initial, {now:()=>now}).credential(), {code:'loop-host/backend-unavailable'})
+  release(); await first
+  assert.equal((await new TokenManager(await f.store(), initial, {now:()=>now}).credential()).access_token, tokenResponse.access_token)
+})
+
 test('successful rotation followed by persistence failure leaves pre-published uncertainty', async t => {
   let calls = 0
   const f = await fixture(t, (_req, res) => { calls++; res.end(JSON.stringify(tokenResponse)) })
@@ -350,7 +440,7 @@ test('successful rotation followed by persistence failure leaves pre-published u
   const reopened = await f.store()
   const recovered = await reopened.read()
   assert.equal(recovered.refresh_state, 'unknown')
-  await assert.rejects(new TokenManager(reopened, initial, {now: () => Date.now() + 30_000}).credential(), {code:'loop-host/needs-auth'})
+  await assert.rejects(new TokenManager(reopened, initial, {now: () => Date.now() + 30_000}).credential(), {code:'loop-host/backend-unavailable'})
   assert.equal(calls, 1)
 })
 

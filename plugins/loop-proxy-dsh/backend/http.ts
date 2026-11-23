@@ -4,6 +4,17 @@ import {LoopError, requireActive} from "./errors.ts"
 import {HostCredentialStore} from "./credentials.ts"
 import type {Credential} from "./credentials.ts"
 
+// Only connection-establishment failures prove that the rotating token was
+// never sent. A reset, read timeout or lost response may follow a committed
+// rotation and must still use the explicit same-grant recovery flow.
+function refreshWasNotSent(error: unknown, depth = 0): boolean {
+  if (!error || typeof error !== "object" || depth > 4) return false
+  const value = error as {code?: string; cause?: unknown; errors?: unknown[]}
+  if (Array.isArray(value.errors) && value.errors.length) return value.errors.every(item => refreshWasNotSent(item, depth + 1))
+  if (["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", "UND_ERR_CONNECT_TIMEOUT"].includes(value.code ?? "")) return true
+  return refreshWasNotSent(value.cause, depth + 1)
+}
+
 export async function boundedJSON(response: Response, limit = 2 << 20, parse: (raw: string) => any = JSON.parse): Promise<any> {
   const reader = response.body?.getReader()
   if (!reader) throw new LoopError("loop-host/backend-invalid", "Loop returned an empty response")
@@ -60,6 +71,7 @@ export class TokenManager {
       if (claim!.refresh_state !== "unknown") return claim!
       if (claim!.refresh_operation === operation) break
       if (performance.now() - waitStarted >= 25_000 || !claim!.refresh_operation || typeof claim!.refresh_started_at !== "number" || this.now() - claim!.refresh_started_at >= 25_000) {
+        if (claim!.refresh_operation) throw new LoopError("loop-host/backend-unavailable", "Loop token refresh is still pending; retry after the connection recovers")
         throw new LoopError("loop-host/needs-auth", "Token refresh outcome is unknown; sign in again")
       }
       try { await delay(50, undefined, {signal}) } catch { requireActive(signal) }
@@ -68,11 +80,20 @@ export class TokenManager {
     const result = await this.store.modify(async current => {
       this.assertCurrent(current)
       if (current!.refresh_operation !== operation) throw new LoopError("loop-host/needs-auth", "Loop connection changed")
+      const {refresh_state, refresh_operation, refresh_started_at, ...clean} = current!
+      // A caller may have been cancelled while waiting for the provider lock.
+      // No request has been sent yet, so do not poison the shared login.
+      if (signal?.aborted) {
+        failure = new LoopError("loop-host/cancelled", "Loop request cancelled")
+        return clean
+      }
       const form = new URLSearchParams({grant_type: "refresh_token", refresh_token: current!.refresh_token, client_id: current!.client_id, resource: current!.resource})
       try {
         const response = await this.fetcher(current!.token_endpoint, {
           method: "POST", redirect: "error", body: form,
-          signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
+          // Once sent, finish and persist rotation independently of a model
+          // turn, catalog poll or stream being cancelled during sleep/wake.
+          signal: AbortSignal.timeout(20_000),
         })
         if (!response.ok) {
           await response.body?.cancel()
@@ -88,14 +109,16 @@ export class TokenManager {
             (token.principal_id !== undefined && token.principal_id !== current!.principal_id)) {
           throw new LoopError("loop-host/backend-invalid", "Loop returned an invalid token response")
         }
-        const {refresh_state, refresh_operation, refresh_started_at, ...clean} = current!
         return {...clean, access_token: token.access_token, refresh_token: token.refresh_token,
           access_expires_at: new Date(this.now() + token.expires_in * 1000).toISOString(), scope: token.scope || current!.scope}
       } catch (error) {
+        if (refreshWasNotSent(error)) {
+          failure = new LoopError("loop-host/backend-unavailable", "Loop token refresh could not connect; retry when the network is available")
+          return clean
+        }
         // A failed read may follow a committed rotation. Persist uncertainty so
         // neither this process nor a restarted Host replays the refresh token.
         failure = error instanceof LoopError ? error : new LoopError("loop-host/needs-auth", "Token refresh outcome is unknown; sign in again", 0, true)
-        const {refresh_operation, refresh_started_at, ...clean} = current!
         return {...clean, refresh_state: "unknown"}
       }
     })

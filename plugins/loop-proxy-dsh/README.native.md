@@ -53,6 +53,15 @@ recipient recorded for that Task.
 
 ## Upgrade and rollback
 
+After sleep or a network change, inactive streams reconnect through the existing
+cursor and inbox deduplication flow. Token refresh failures proven to occur
+before connection establishment leave the login retryable on the next request.
+Cancelling one task does not cancel an already-sent shared token rotation; the
+new credentials are saved before that caller receives cancellation. If a refresh
+response is lost after the request may have reached Loop, confirm recovery in
+the login dialog to keep the original grant and session associations. The plugin
+never automatically replays an uncertain rotating token.
+
 Keep the previous plugin artifact and the existing DSH home. The installation
 identity is retained. Existing private Home proofs are imported into DSH's
 credential provider without deleting the old proof. Collaboration v1 state is
