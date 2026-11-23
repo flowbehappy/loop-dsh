@@ -71,3 +71,74 @@ test('stream cancellation closes the socket and rejects a blocked reader',async 
   await assert.rejects(read,{code:'loop-host/cancelled'})
   await assert.rejects(stream.read(),{code:'loop-host/cancelled'})
 })
+
+test('silent OPEN socket expires and releases a blocked reader without aborting its owner',async t=>{
+  const f=await fixture(t,()=>{}),control=new AbortController()
+  t.mock.timers.enable({apis:['Date','setInterval'],now:1_000_000})
+  const stream=await ProtectedStream.open(f.tokens,'/catalog/events',{},control.signal)
+  t.after(()=>stream.close())
+  const rejected=assert.rejects(stream.read(),{code:'loop-host/backend-unavailable',message:'Loop stream heartbeat timed out'})
+  t.mock.timers.tick(89_999);assert.equal(stream.connected,true)
+  t.mock.timers.tick(1);await rejected
+  assert.equal(stream.connected,false);assert.equal(control.signal.aborted,false)
+  t.mock.timers.tick(300_000)
+})
+
+test('control heartbeats keep an idle slow consumer alive for several timeout periods',async t=>{
+  let socket
+  const f=await fixture(t,client=>{socket=client})
+  t.mock.timers.enable({apis:['Date','setInterval'],now:1_000_000})
+  const stream=await ProtectedStream.open(f.tokens,'/catalog/events',{})
+  t.after(()=>stream.close())
+  for(let i=0;i<12;i++){
+    t.mock.timers.tick(25_000)
+    const pong=once(socket,'pong');socket.ping();await pong
+    assert.equal(stream.connected,true)
+  }
+  socket.send(JSON.stringify({kind:'ping'}))
+  assert.equal((await stream.read()).kind,'ping')
+  t.mock.timers.tick(89_999);assert.equal(stream.connected,true)
+  t.mock.timers.tick(15_001);assert.equal(stream.connected,false)
+})
+
+test('queued application traffic counts as activity without depending on read speed',async t=>{
+  let socket
+  const f=await fixture(t,client=>{socket=client})
+  t.mock.timers.enable({apis:['Date','setInterval'],now:1_000_000})
+  const stream=await ProtectedStream.open(f.tokens,'/catalog/events',{})
+  t.after(()=>stream.close())
+  for(let i=0;i<8;i++){
+    t.mock.timers.tick(25_000)
+    socket.send(JSON.stringify({kind:'ping',i:String(i)}))
+    await waitFor(()=>stream.queue.length===i+1)
+  }
+  for(let i=0;i<8;i++)assert.deepEqual({...await stream.read()},{kind:'ping',i:String(i)})
+  assert.equal(stream.connected,true)
+})
+
+for(const jump of [3_600_000,-60_000])test(`wake/clock jump ${jump} invalidates stale live state before the timer runs`,async t=>{
+  const f=await fixture(t,()=>{})
+  t.mock.timers.enable({apis:['Date','setInterval'],now:1_000_000})
+  const stream=await ProtectedStream.open(f.tokens,'/catalog/events',{})
+  t.after(()=>stream.close())
+  t.mock.timers.setTime(1_000_000+jump)
+  assert.equal(stream.connected,false)
+  await assert.rejects(stream.read(),{code:'loop-host/backend-unavailable'})
+})
+
+test('catalog resumes its acknowledged cursor after silent transport loss',async t=>{
+  const events=[],acks=[]
+  const f=await fixture(t,(socket,_req,count)=>{
+    socket.send(JSON.stringify(hello(count>1?{snapshotRequired:false}:{})))
+    socket.on('message',raw=>acks.push(JSON.parse(raw)))
+  })
+  t.mock.timers.enable({apis:['Date','setInterval'],now:1_000_000})
+  const watch=new CatalogWatch(f.tokens,async()=>f.scope,event=>events.push(event));t.after(()=>watch.dispose())
+  await waitFor(()=>acks.length===1)
+  t.mock.timers.tick(90_000)
+  await waitFor(()=>f.requests.length===2)
+  assert.equal(new URL(f.requests[1].url,f.base).searchParams.get('afterEventSeq'),'5')
+  assert.ok(events.some(item=>item.event.status?.state==='backoff'))
+  await watch.dispose();t.mock.timers.tick(180_000)
+  assert.equal(f.requests.length,2)
+})

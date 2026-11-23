@@ -259,3 +259,12 @@ it('clears token drafts and sends a personal assistant token only to the committ
   expect(input().value).toBe('')
   expect(h.remote.connectAccount).toHaveBeenCalledTimes(1)
 })
+
+it('explains an uncertain renewal without labeling it as an expired session', async () => {
+  const h=setup()
+  h.remote.globalServerStatus.mockResolvedValue(success({serverUrl:'https://loop.test',serverRevision:'rev_a',connection:{state:'needs_auth',reason:'refresh_outcome_unknown'}}) as never)
+  await open(h)
+  render(createElement(LoopLoginDialog,h.props as never))
+  expect(screen.getByRole('status').textContent).toContain(en['login.refreshUncertain'])
+  expect(screen.getByRole('status').textContent).not.toContain(en['login.expired'])
+})

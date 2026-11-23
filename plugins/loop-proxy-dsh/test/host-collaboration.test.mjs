@@ -3391,3 +3391,32 @@ for (const proof of ["committed", "canceled"]) test(`recovered ${proof} receipt 
   }
   assert.equal(f.agent.sent.length, 0)
 })
+
+test('silent collaboration reconnect replays persisted feedback without a second Host wake',async t=>{
+  const http=createServer(),server=new WebSocketServer({server:http})
+  let watch
+  t.after(async()=>{await watch?.dispose();for(const socket of server.clients)socket.terminate();await new Promise(r=>server.close(r));await new Promise(r=>http.close(r))})
+  http.listen(0,'127.0.0.1');await once(http,'listening')
+  const n=await nativeDeliveryFixture(t,`http://127.0.0.1:${http.address().port}`)
+  const f=runtimeFixture();t.after(()=>f.collaboration.dispose())
+  const frames=[],requests=[],acks=[],feedback={...proxyEvent().event.event,eventSeq:9007199254740993n}
+  server.on('connection',(socket,request)=>{
+    requests.push(request)
+    socket.on('message',raw=>acks.push(String(raw)))
+    socket.send(JSON.stringify({kind:'hello',generation:'cbind_1:3',subscriptionId:'stream_'+requests.length,agentMemberId:AGENT_MEMBER_ID}))
+    socket.send(stringifyWire({kind:'event',event:feedback}))
+    socket.send(stringifyWire({kind:'replay_end',throughEventSeq:feedback.eventSeq}))
+  })
+  t.mock.timers.enable({apis:['Date','setInterval'],now:Date.now()})
+  watch=new CollaborationWatch(n.api,n.store,n.namespace,event=>frames.push(event))
+  await until(()=>watch.state==='live'&&acks.length===1)
+  await f.collaboration.acceptProxyEvent(frames.find(e=>e.event.delivery))
+  assert.equal(f.agent.sent.length,1)
+  t.mock.timers.tick(90_000)
+  assert.equal(watch.state,'backoff')
+  await until(()=>requests.length===2&&watch.state==='live'&&acks.length===2)
+  assert.equal(new URL(requests[1].url,'http://localhost').searchParams.get('afterEventSeq'),String(feedback.eventSeq))
+  for(const frame of frames.filter(e=>e.event.delivery))await f.collaboration.acceptProxyEvent(frame)
+  assert.equal(f.agent.sent.length,1)
+  assert.equal(Object.keys((await n.store.load(n.namespace)).events).length,1)
+})

@@ -191,6 +191,31 @@
         "revoke login token and confirm iframe exits"
       ],
       "expected": "correct page and identity at every step; revocation takes effect; no daily environment changes"
+    },
+    {
+      "id": "connection-recovery",
+      "automation": [
+        "plugins/loop-proxy-dsh/test/native-stream.test.mjs",
+        "plugins/loop-proxy-dsh/test/native-recovery.test.mjs",
+        "plugins/loop-proxy-dsh/test/native-real-loop.test.mjs",
+        "plugins/loop-proxy-dsh/test/host-collaboration.test.mjs"
+      ],
+      "coverage": [
+        "silent OPEN transport timeout and acknowledged cursor replay",
+        "idle control heartbeat and slow application consumer",
+        "sleep-sized forward clock jump and backwards clock adjustment",
+        "stream cancellation and no duplicate Host wake after replay",
+        "unknown refresh restored only after explicit Human confirmation",
+        "same grant, device, principal and generation preserved",
+        "two independent providers and separate processes serialize recovery",
+        "cancel, lost exchange response, replacement login and logout fencing",
+        "reverse-proxy URL prefix",
+        "revoked device or unsupported recovery fails closed with explicit reconnect guidance"
+      ],
+      "manual": [
+        "actual macOS sleep/wake and Wi-Fi change",
+        "native Desktop confirmation window"
+      ]
     }
   ],
   "provenance": {

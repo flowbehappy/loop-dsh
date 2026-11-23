@@ -147,7 +147,7 @@ export class NativeHostActions {
         if (requestPageAccess) throw new LoopError("loop-host/needs-auth","Reconnect the assistant before authorizing pages")
         if(this.loginError){const error=this.loginError;this.loginError=undefined;throw error}
         // Poll cancellation must not cancel an already-presented browser consent.
-        const started=await this.backend!.beginLogin(accessToken ? signal : this.control.signal,accessToken)
+        const started=await this.backend!.beginLogin(accessToken ? signal : this.control.signal,accessToken,this.workspace)
         if (!accessToken) this.challenge={id:started.challengeId,loginUrl:started.authorizationURL,expiresAt:new Date(Date.now()+10*60_000).toISOString()}
         const publish=async()=>{
           const identity=await this.backend!.completeLogin(started.challengeId)

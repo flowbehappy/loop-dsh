@@ -1230,3 +1230,14 @@ test('disconnect waits for a just-completed login locator and fences concurrent 
   release();await disconnect
   assert.deepEqual(revoked,['workspace']);assert.equal(adapter.accountPrincipal,'')
 })
+
+
+test('account status explains unknown refresh and does not replay the refresh token',async t=>{
+  const {LoopBackend}=await import('../backend/runtime.ts')
+  let calls=0
+  const f=await fixture(t,req=>{calls++;req.socket.destroy()})
+  await f.credentials.publish({...f.value,access_expires_at:new Date(0).toISOString()})
+  const runtime=new LoopBackend({provider:f.provider,server:f.base,installation:'installation',pageOrigin:f.base});t.after(()=>runtime.dispose())
+  for(let i=0;i<2;i++)assert.deepEqual(await runtime.accountStatus('workspace'),{state:'needs_auth',accountPrincipal:'principal',workspaceId:'workspace',reason:'refresh_outcome_unknown'})
+  assert.equal(calls,1)
+})

@@ -102,6 +102,7 @@ export type GlobalPageRequest = Record<never, never>
 export type GlobalPage = { readonly url: string }
 export type GlobalServerStatusRequest = Record<never, never>
 export interface AccountLoginStatus {
+  readonly reason?: 'refresh_outcome_unknown'
   readonly deviceOnly?: boolean
   readonly state: 'signed_in' | 'signed_out' | 'needs_auth' | 'signing_out' | 'unavailable'
   readonly grantId?: string
