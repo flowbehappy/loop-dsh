@@ -1,6 +1,6 @@
 {
   "name": "@pingkai/dsh-loop-sync",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Opt-in visible Human/Agent conversation sync from official DeepSeek Harness into Loop",
   "type": "module",
   "main": "lib/index.js",
