@@ -684,7 +684,7 @@ test("Loop Wiki 你看看里边有什么东西。 forwards browsing and preserve
     agentCommand: LoopHostService.prototype.agentCommand,
     checkAssignee: LoopHostService.prototype.checkAssignee,
     checkChannelRead: LoopHostService.prototype.checkChannelRead,
-    channelReads: new WeakSet(),
+    channelReads: new WeakMap(),
     canUseAgentActions: () => true,
     humanTasks: {current: () => message, canOffer: () => false},
     runtime: {async agentCommand(id, command) {
@@ -782,4 +782,21 @@ test("invalid, cross-session and excessive references fail closed with readable 
   message.content = Array.from({length:33},(_,i)=>knowledgeMessage("x",`kb_${i}`).content[0])
   const result = await runtime.injectClaimedUserKnowledge({session:{id:"ses_1"}},[message],{kind:"enter",messages:[message]})
   assert.equal(result.messages.at(-1).source.loopKnowledge.blocked,true)
+})
+
+test('an incomplete channel name admits only a scoped retry for its directory match',()=>{
+  const message = {}, channelReads = new WeakMap(), service = {channelReads}
+  const check = (action,args)=>LoopHostService.prototype.checkChannelRead.call(service,message,{verb:'call',name:action,input:JSON.stringify(args)})
+  const candidate = {channelId:'chn_north',slug:'#north-team',displayName:'North Team (Monday)'}
+  channelReads.set(message,{pending:true})
+  assert.throws(()=>check('message.history',{target:candidate.slug}),/pending/)
+  channelReads.set(message,{candidate,reason:'Incomplete name'})
+  assert.equal(check('message.search',{target:candidate.slug,query:'meeting'}),candidate)
+  assert.equal(check('message.history',{channelName:candidate.displayName}),candidate)
+  for (const [action,args] of [['message.search',{}],['message.search',{target:'#elsewhere'}],
+       ['message.get',{target:candidate.slug,messageId:'other'}],['message.history',{target:candidate.slug,channelName:'wrong'}]]) {
+    assert.throws(()=>check(action,args),/before reading another channel/)
+  }
+  channelReads.set(message,{reason:'The user declined.'})
+  assert.throws(()=>check('message.search',{target:candidate.slug}),/declined/)
 })

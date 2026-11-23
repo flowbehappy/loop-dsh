@@ -108,3 +108,27 @@ test('named task delegation preserves board and assignee and requires an exact w
   policy.workspaceWide = true
   await assert.rejects(createNamedChannelTask(api,input,true),/exact write authorization/)
 })
+
+test('a shortened name returns only a verified directory candidate, before reading or requesting access',async () => {
+  const entry = {name:'north-team',displayName:'North Team (Monday)'}
+  const requests = []
+  const api = {async invoke(action,args) {
+    assert.equal(action,'workspace.list')
+    requests.push(args)
+    const channels = args.query ? [entry] : args.channelName === '#north-team' ? [{...entry,channelId:'chn_north'}] : []
+    return {data:{data:{channels}}}
+  }}
+  const result = await readNamedChannel(api,{channelName:'North Team'},true)
+  assert.deepEqual(result.error.candidate,{channelId:'chn_north',displayName:entry.displayName,slug:'#north-team'})
+  assert.deepEqual(requests.map(row=>row.query || row.channelName),['North Team','North Team','#north-team'])
+  for (const page of [{channels:[]},{channels:[entry,entry]},{channels:[entry],hasMore:true},
+                      {channels:[{...entry,displayName:'Another group',description:'North Team'}]}]) {
+    const api = {async invoke(action,args) {
+      assert.equal(action,'workspace.list')
+      return {data:{data:args.query ? page : {channels:[]}}}
+    }}
+    await assert.rejects(readNamedChannel(api,{channelName:'North Team'},true),error=>error.code==='channel_not_found')
+  }
+  await assert.rejects(readNamedChannel(api,{channelName:'#north'},true),error=>error.code==='channel_not_found')
+  assert.equal(requests.at(-1).channelName,'#north')
+})

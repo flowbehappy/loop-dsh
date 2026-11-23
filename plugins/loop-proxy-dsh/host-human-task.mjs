@@ -78,7 +78,7 @@ export class HumanTaskConsent {
   decide({sessionId,requestId,decision}) {
     const entry = this.pending.get(sessionId)
     if (!entry || entry.view?.requestId !== requestId || this.current(sessionId) !== entry.message) throw refusal("This task authorization is no longer active.")
-    if (decision === "cancel") entry.cancel.abort(refusal("The user declined task authorization."))
+    if (decision === "cancel") entry.cancel.abort(Object.assign(new Error("The user declined task authorization."),{code:"loop-host/consent-declined"}))
     else if (decision === "reuse" && entry.view.state === "reuse") entry.resolve()
     else throw refusal("This task requires confirmation in Loop.")
     return {}
@@ -98,18 +98,22 @@ export class HumanTaskConsent {
     const policy = taskPolicy(command)
     let history = this.offers.get(message)
     if (!history) {
-      history = {requests:new Set(), declined:new Set()}
+      history = {requests:new Map(), declined:new Set()}
       this.offers.set(message,history)
     }
     const requestKey = createHash("sha256").update(policy.policyKey).update(input).digest("hex")
-    if (history.declined.has(action) || history.requests.has(requestKey)) {
-      throw refusal("This authorization was already requested in this turn. Do not repeat it.")
+    if (history.declined.has(action)) {
+      throw refusal("The user declined the authorization already requested in this turn. No confirmation is pending.")
     }
-    history.requests.add(requestKey)
+    if (this.pending.has(sessionId)) throw refusal("Finish the pending authorization in this task.")
+    const previous = history.requests.get(requestKey)
+    if (previous) throw refusal(previous)
+    history.requests.set(requestKey,"This authorization was already requested in this turn. Do not repeat it.")
     try {
       return await this.confirm(sessionId,message,policy,signal,owner,agentDenied)
     } catch (error) {
-      history.declined.add(action)
+      if (error?.code === "loop-host/consent-declined") history.declined.add(action)
+      else history.requests.set(requestKey,"The previous authorization attempt ended: "+error.message+". No confirmation card is waiting for this attempt.")
       throw error
     }
   }

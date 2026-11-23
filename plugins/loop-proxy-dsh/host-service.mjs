@@ -76,7 +76,7 @@ export default class LoopHostService extends TypertRemoteService {
       current: id => this.collaboration.currentUserInputs.get(id)?.message,
       request: (...args) => this.runtime.humanConnectionRequest(...args),
     })
-    this.channelReads = new WeakSet()
+    this.channelReads = new WeakMap()
     this.assigneeAnswers = new WeakMap()
     ctx.on("session/event",(session,event)=>{
       const message = this.humanTasks.current(session.id)
@@ -487,9 +487,9 @@ export default class LoopHostService extends TypertRemoteService {
     if (command.name === "task.create" && command.verb === "call") this.collaboration.checkDispatchRetry(sessionId,command)
     if (command.verb === "authorize") return this.humanTasks.authorize(sessionId, command, signal)
     checkDocumentShare(command,this.humanTasks.current(sessionId),this.runtime.serviceBaseUrl)
-    this.checkChannelRead(this.humanTasks.current(sessionId),command)
     const task = this.humanTasks.forCommand(sessionId, command)
     await this.checkAssignee(sessionId,task.message,command,signal)
+    this.checkChannelRead(task.message,command)
     return this.runtime.humanCommand(sessionId, command, signal, () => this.humanTasks.current(sessionId) === task.message, task.grant)
   }
 
@@ -513,22 +513,28 @@ export default class LoopHostService extends TypertRemoteService {
         command = {...command,input:JSON.stringify({...page,channelName:args.channelName || target,readAs:"human"})}
       }
     }
-    this.checkChannelRead(message,command)
     await this.checkAssignee(sessionId,message,command,signal)
+    const recovery = this.checkChannelRead(message,command)
     const args = command.verb === "call" && command.name === "message.history" ? JSON.parse(command.input) : {}
-    const named = message && (typeof args.channelName === "string" || /^#[a-z0-9][a-z0-9-]*$/u.test(args.target))
+    const named = message && (recovery || typeof args.channelName === "string" || /^#[a-z0-9][a-z0-9-]*$/u.test(args.target))
     // A display-name lookup can suspend at consent. Keep concurrent fallback
     // reads out of this user turn while the named read is pending or failed.
-    if (named && args.channelName) this.channelReads.add(message)
+    if (named) this.channelReads.set(message,{pending:true})
     try {
       const result = await this.runtime.agentCommand(sessionId, command, signal, this.humanTasks.canOffer(message))
       if (named && this.humanTasks.current(sessionId) !== message) throw new Error("The originating user request changed.")
       if (!result.delegation) {
-        if (named && result.failed) this.channelReads.add(message)
-        else if (named && args.channelName) this.channelReads.delete(message)
+        if (named && result.failed) {
+          const candidate = result.channelCandidate ?? (result.errorCode === "action_unavailable" ? recovery : undefined)
+          this.channelReads.set(message,{candidate,reason:result.output})
+        } else if (named) {
+          if (recovery && command.name === "message.history" && JSON.parse(result.output)?.data?.data?.targetKey !== recovery.channelId) {
+            throw new Error("Loop did not return history for the resolved channel.")
+          }
+          this.channelReads.delete(message)
+        }
         return result
       }
-      if (named) this.channelReads.add(message)
       const input = result.delegationArguments ? JSON.stringify(result.delegationArguments) : command.input
       const summary = result.channelLabel && command.name === "task.create"
         ? "Create task in "+result.channelLabel+": "+result.delegationArguments.tasks[0].title
@@ -545,16 +551,17 @@ export default class LoopHostService extends TypertRemoteService {
           throw new Error("Inspect the create receipt for "+(task?.taskId ?? "the requested task")+" in "+result.channelLabel+" before retrying.")
         }
       }
+      if (named && response.failed) this.channelReads.set(message,{reason:response.output})
       if (named && !response.failed) {
         const expected = result.delegationArguments?.target
-        if (expected && "channel:"+JSON.parse(response.output)?.data?.data?.targetKey !== expected) {
+        if (command.name === "message.history" && expected && "channel:"+JSON.parse(response.output)?.data?.data?.targetKey !== expected) {
           throw new Error("Loop did not return history for the authorized channel.")
         }
         this.channelReads.delete(message)
       }
       return response
     } catch (error) {
-      if (named) this.channelReads.add(message)
+      if (named) this.channelReads.set(message,{candidate:error.code === "action_unavailable" ? recovery : undefined,reason:error.message})
       throw error
     }
   }
@@ -599,9 +606,17 @@ export default class LoopHostService extends TypertRemoteService {
   }
 
   checkChannelRead(message,command) {
-    if (command.verb === "call" && ["message.history","message.get","message.search"].includes(command.name) && this.channelReads.has(message)) {
-      throw new Error("The named channel read is pending or could not finish. Stop here and ask the user before reading another channel.")
+    if (command.verb !== "call" || !["message.history","message.get","message.search"].includes(command.name)) return
+    const prior = this.channelReads.get(message)
+    if (!prior) return
+    if (prior.pending) throw new Error("Wait for the pending channel read before reading another channel.")
+    const args = JSON.parse(command.input)
+    const match = prior.candidate
+    if (match && command.name !== "message.get") {
+      if (!args.channelName && [match.slug,"channel:"+match.channelId].includes(args.target)) return match
+      if (!args.target && command.name === "message.history" && [match.slug,match.displayName].includes(args.channelName)) return match
     }
+    throw new Error("Keep the original target; clarify before reading another channel. Previous result: "+prior.reason)
   }
 
   async remote(signal, operation) {

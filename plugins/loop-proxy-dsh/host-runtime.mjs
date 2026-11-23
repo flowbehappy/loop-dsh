@@ -1789,7 +1789,8 @@ export class LoopHostRuntime {
       if (!Array.isArray(result?.actions) || result.actions.some(name => typeof name !== "string")) {
         throw failure("loop-host/backend-invalid", "Loop Agent action catalog is invalid")
       }
-      if (result.authorizationAvailable?.length) return {failed:false,output:boundedJSON({actions:result.actions,requiresHumanAuthorization:result.authorizationAvailable})}
+      if (result.authorizationAvailable?.length) return {failed:false,output:boundedJSON({actions:result.actions,requiresHumanAuthorization:result.authorizationAvailable,
+        hint:"Use loop-proxy schema <action> to see the arguments before requesting access. Keep the user’s target and filters."})}
       if (result.actions.length === 0) {
         if (/^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+$/u.test(command.name ?? "")) {
           const descriptor = await this.actions.agentSchema({
@@ -1845,6 +1846,9 @@ export class LoopHostRuntime {
       const webUrl = !result.error && resultWebUrl(command.name, result.data?.data, this.serviceBaseUrl, loopWorkspaceId)
       return {
         failed: Boolean(result.error),
+        ...(result.error ? {errorCode:result.error.code} : {}),
+        ...(command.name === "message.history" && result.error?.code === "channel_name_incomplete"
+          ? {channelCandidate:result.error.candidate} : {}),
         output: boundedJSON(command.name === "message.history" ? historyResult(result, "agent")
           : webUrl ? {...result, webUrl} : result),
       }

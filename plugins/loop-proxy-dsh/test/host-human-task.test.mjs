@@ -117,3 +117,20 @@ test("manual authorization derives omitted write scope from the published action
   const readOnly={...send,input:JSON.stringify({...JSON.parse(send.input),write:false})}
   await assert.rejects(tasks.authorize("chat",readOnly,signal),/published Loop action/)
 })
+
+test('a failed consent transport and a concurrent offer are distinct from an explicit refusal',async t=>{
+  const message=input('查看我的项目'), signal=new AbortController().signal
+  const tasks=new HumanTaskConsent({current:()=>message})
+  t.after(()=>tasks.dispose())
+  const preview={action:'project.get',resourceConstraints:['project:a'],manage:false,write:false,workspaceWide:false}
+  const offer=p=>tasks.offer('chat',message,{},p,'查看项目',signal)
+  tasks.confirm=async()=>{throw new Error('Loop unavailable')}
+  await assert.rejects(offer(preview),/Loop unavailable/)
+  await assert.rejects(offer(preview),/No confirmation card is waiting/)
+  const other={...preview,resourceConstraints:['project:b']}
+  tasks.pending.set('chat',{})
+  await assert.rejects(offer(other),/pending authorization/)
+  tasks.pending.delete('chat')
+  tasks.confirm=async()=>({id:'new'})
+  assert.deepEqual(await offer(other),{id:'new'})
+})

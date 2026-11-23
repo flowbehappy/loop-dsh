@@ -105,6 +105,7 @@ export async function beginHumanOAuth(options:{server:string;workspace:string;re
     if(consent.resourceConstraints.length)params.set("resource_constraints",consent.resourceConstraints.join(","))
     const result=callback.then(async query=>{
       requireActive(signal)
+      if(query.get("error")==="access_denied")throw new LoopError("loop-host/consent-declined","The user declined task authorization.")
       if(query.get("error"))throw new LoopError("loop-host/needs-auth","Loop Human authorization was not approved")
       const code=query.get("code")
       if(!code || query.getAll("code").length!==1 || query.getAll("iss").length>1 ||

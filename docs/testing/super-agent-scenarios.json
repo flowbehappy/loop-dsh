@@ -150,7 +150,15 @@
         {
           "prompt": "在「{channel}」频道里帮我找那条带“闹钟”的消息，我想看原话。",
           "setup": "Post a known message in a dedicated private test channel and verify the text in Loop first.",
-          "verify": "Match the original text and author. Record whether the user has an actionable confirmation if access is missing, and whether they are asked to find or paste the message themselves."
+          "verify": "Match the original text and author. Record whether the user has an actionable confirmation if access is missing, and whether they are asked to find or paste the message themselves.",
+          "variants": [
+            "Use a unique shortened display name with a suffix on the actual channel.",
+            "Reuse the prefix across two channels and verify neither history is read without clarification."
+          ]
+        },
+        {
+          "prompt": "把我名下的全部 Loop 资源按类型列出来，带上名称和 ID。",
+          "verify": "Place a project outside assistant membership. Verify the owner directory includes it, handles pagination, and any whole-directory consent follows this explicit request."
         }
       ],
       "method": "Give the prompt verbatim with no workflow hints. Record first-attempt results before retries. If a normal confirmation appears, record what it covers; interventions or hints are reported separately."
