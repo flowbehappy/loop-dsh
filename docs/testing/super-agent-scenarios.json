@@ -124,6 +124,26 @@
       ]
     },
     {
+      "id": "plain-language-delegation",
+      "level": "live-dsh-and-loop",
+      "setup": "Use a new DSH folder linked to a private test channel. Use two or more available Loop agents and a private project the assistant and worker have not joined. Substitute only their display names. Start from a new conversation for each prompt.",
+      "cases": [
+        {
+          "prompt": "让 {agent} 帮我写首下班路上哼的小曲。",
+          "verify": "An actual task on the intended board, the named assignee's delivery, and its return in the originating conversation."
+        },
+        {
+          "prompt": "帮我找 {agent}，在「{project}」这个项目里写首春天的小诗。写好了让我看看。",
+          "verify": "Record every user interruption verbatim. Check the project, assignee, membership and final poem against Loop. Count who actually contributed and whether the user had to copy a link or ID."
+        },
+        {
+          "prompt": "让 {author} 和 {reviewer} 一起给周一早上的闹钟想句台词吧，一个先出主意，另一个挑挑毛病，商量好给我一句。",
+          "verify": "Both named workers contribute in the same discussion. Match the draft, critique, author confirmation and the line sent back to the original DSH conversation."
+        }
+      ],
+      "method": "Give the prompt verbatim with no workflow hints. Record first-attempt results before retries. If a normal confirmation appears, record what it covers; interventions or hints are reported separately."
+    },
+    {
       "id": "gui",
       "level": "actual-web-and-desktop",
       "steps": [
