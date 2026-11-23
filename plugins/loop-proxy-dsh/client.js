@@ -6903,6 +6903,21 @@ window.__ModuleLoader__.load({
     // client/ui/human-task-panel.tsx
     var import_react5 = require("react");
     var import_dsh_client_ui_primitives5 = require("@deepseek-ai/dsh-client-ui-primitives");
+
+    // client/ui/format-resource-constraint.ts
+    function formatResourceConstraint(value) {
+      const match = /^(resource-lookup:[a-z][a-z0-9-]*\/)(.+)$/u.exec(value);
+      if (!match) return value;
+      try {
+        const name2 = decodeURIComponent(match[2].replace(/\+/gu, " "));
+        if (/[\p{Cc}\p{Bidi_Control}]/u.test(name2)) return value;
+        return match[1] + JSON.stringify(name2);
+      } catch {
+        return value;
+      }
+    }
+
+    // client/ui/human-task-panel.tsx
     var import_jsx_runtime5 = require("react/jsx-runtime");
     function watchHumanTask(selected, remote, publish) {
       let session;
@@ -6971,7 +6986,7 @@ window.__ModuleLoader__.load({
           frame.action,
           frame.manage && " \xB7 " + t("human.manage")
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: frame.resources.length ? frame.resources.join(" \xB7 ") : t("human.all") }),
+        /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: frame.resources.length ? frame.resources.map(formatResourceConstraint).join(" \xB7 ") : t("human.all") }),
         /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("p", { children: frame.state === "browser" ? t("human.reusable") : t("human.expires", { date: new Date(frame.expiresAt).toLocaleString() }) }),
         /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { children: [
           /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(import_dsh_client_ui_primitives5.Button, { variant: "primary", onClick: () => {

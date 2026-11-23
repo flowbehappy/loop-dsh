@@ -3,6 +3,7 @@ import {Button} from '@deepseek-ai/dsh-client-ui-primitives'
 import type {SessionId} from '@deepseek-ai/dsh-session/types'
 import type {PropsLocale, HostObservable, StandardSourceBinding} from '@deepseek-ai/dsh-client-ui-slots'
 import type {HumanTaskFrame} from '../../remote.mjs'
+import {formatResourceConstraint} from './format-resource-constraint.ts'
 import {openExternal} from './external-link.ts'
 import type {NS} from './locales.ts'
 import type {LoopHostClient} from './types.ts'
@@ -74,7 +75,7 @@ export function HumanTaskPanel({matched,remote,t}:PropsLocale<typeof NS> & {
     {frame.agentDenied && <p>{t('human.agentDenied')}</p>}
     <strong>{frame.summary}</strong>
     <p>{t('human.title')} · {frame.action}{frame.manage && ' · '+t('human.manage')}</p>
-    <p>{frame.resources.length ? frame.resources.join(' · ') : t('human.all')}</p>
+    <p>{frame.resources.length ? frame.resources.map(formatResourceConstraint).join(' · ') : t('human.all')}</p>
     <p>{frame.state === 'browser' ? t('human.reusable') : t('human.expires',{date:new Date(frame.expiresAt).toLocaleString()})}</p>
     <div>
       <Button variant="primary" onClick={() => {
