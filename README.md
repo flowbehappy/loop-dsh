@@ -28,3 +28,7 @@ Agent 可按需读取随插件安装的操作指南，查询当前连接可用�
 - **工作流与项目**　从侧栏「更多」打开工作流、项目、云盘等页面。查看项目详情时，再选一次「更多 → 项目」即可回到当前工作区的项目列表，切换到其他项目。
 
 [中文使用指南](docs/public/zh/agents/connect-super-agent.md) · [English guide](docs/public/en/agents/connect-super-agent.md) · [开发与打包](plugins/loop-proxy-dsh/README.native.md)
+
+## 许可证
+
+本项目基于 [Apache License 2.0](LICENSE) 开源发布；第三方依赖沿用其各自的许可证。

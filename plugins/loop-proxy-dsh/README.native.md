@@ -93,3 +93,7 @@ coverage boundaries. A model E2E uses a deterministic upstream, the real Loop
 server, the official DSH runtime and persisted session output. Protocol tests
 and macOS headless tests do not establish Windows/Linux or Desktop GUI
 acceptance.
+
+## License
+
+Released under the [Apache License 2.0](https://github.com/flowbehappy/loop-dsh/blob/main/LICENSE). See the `LICENSE` file shipped in this package. Third-party dependencies keep their own licenses.

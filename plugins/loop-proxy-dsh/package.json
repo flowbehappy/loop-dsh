@@ -69,7 +69,7 @@
     "backend/dist",
     "managed-config.mjs"
   ],
-  "license": "Proprietary",
+  "license": "Apache-2.0",
   "engines": {
     "node": "^22.19.0 || >=24.0.0",
     "dsh": ">=0.2.2-rc.1"
