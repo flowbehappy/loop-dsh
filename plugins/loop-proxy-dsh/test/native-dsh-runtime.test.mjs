@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp,mkdir,writeFile,readFile,rm,symlink} from 'node:fs/promises'
+import {mkdtemp,mkdir,writeFile,readFile,rm,symlink,cp} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {dirname,join,resolve,isAbsolute} from 'node:path'
 import {fileURLToPath} from 'node:url'
@@ -50,7 +50,10 @@ for(const method of ['browser','access-token'])test('packaged plugin signs in an
   const buildScript=process.env.LOOP_TS_E2E_PLUGIN_SOURCE
     ? resolve(process.env.LOOP_TS_E2E_PLUGIN_SOURCE,'build-native.mjs')
     : fileURLToPath(new URL('../build-native.mjs',import.meta.url))
-  await exec(process.execPath,[buildScript,packageRoot],{maxBuffer:4<<20})
+  if(process.env.LOOP_TS_E2E_PACKAGE_DIR){
+    assert.ok(isAbsolute(process.env.LOOP_TS_E2E_PACKAGE_DIR),'supply an explicit immutable package directory')
+    await cp(process.env.LOOP_TS_E2E_PACKAGE_DIR,packageRoot,{recursive:true})
+  }else await exec(process.execPath,[buildScript,packageRoot],{maxBuffer:4<<20})
   const profile=join(home,'profiles/web')
   if(process.env.LOOP_TS_E2E_INSTALL_PACKAGE==='1'){
     const packed=await exec('npm',['pack','--json','--pack-destination',root],{cwd:packageRoot,env:environment,maxBuffer:4<<20})
