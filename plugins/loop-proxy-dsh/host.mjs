@@ -99,7 +99,7 @@ export function createLoopProxyBridge(ctx, options = {}) {
     }
     if (parsed.principal === "human") {
       try {
-        const result = await loopHost?.humanCommand?.(sessionID, parsed, exec.signal)
+        const result = await loopHost?.humanCommand?.(sessionID, parsed, exec.signal, args.description)
         return shellResult(sessionID, result ?? {failed: true, output: JSON.stringify({error: {
           code: "loop-host/backend-unavailable", message: "The native Loop Human connection is unavailable.", dispatched: false,
         }})}, exec)

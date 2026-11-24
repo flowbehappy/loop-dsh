@@ -95,3 +95,39 @@ test('Host errors keep redacted server evidence on any route and through the too
   assert.doesNotMatch(result.value.stdout.text,/secret-access|secret-refresh|private/)
   bridge.dispose()
 })
+
+test('explicit Human calls preview unknown actions, obtain exact consent and execute unchanged arguments',async()=>{
+  const {host}=fixture(),args={resource:'exact',requestId:'stable',opaque:{value:1}},command={principal:'human',connection:'business',verb:'call',name:'future.publish',input:JSON.stringify(args)}
+  const grant={id:'approved',policy:{connection:'business'}}
+  host.humanTasks.forCommand=()=>undefined
+  host.runtime.previewHumanCommand=async(_id,c)=>{assert.equal(c,command);return {owner:{accountPrincipal:'owner'},delegation:{action:c.name,resourceConstraints:['resource:exact'],write:true}}}
+  let executed=0
+  host.humanTasks.offer=async(_id,current,_owner,preview,description,_signal,input,denied)=>{
+    assert.equal(current,message);assert.equal(preview.action,command.name);assert.equal(description,'Publish requested object');assert.equal(input,command.input);assert.equal(denied,false);return grant
+  }
+  host.runtime.humanCommand=async(_id,c,_signal,current,g)=>{executed++;assert.equal(current(),true);assert.equal(g,grant);assert.deepEqual(c,command);return {output:'receipt',failed:false}}
+  const call=()=>Host.prototype.humanCommand.call(host,sessionId,command,new AbortController().signal,'Publish requested object')
+  assert.equal((await call()).output,'receipt');assert.equal(executed,1)
+  host.humanTasks.offer=async()=>{throw new Error('declined')}
+  await assert.rejects(call(),/declined/);assert.equal(executed,1)
+  host.humanTasks.canOffer=()=>false
+  await assert.rejects(call(),/current user request/);assert.equal(executed,1)
+})
+
+test('Human schema discovery does not request consent; changed requests cannot proceed from preview',async()=>{
+  const {host}=fixture(),command={principal:'human',connection:'business',verb:'schema',name:'future.publish',input:''}
+  host.humanTasks.forCommand=()=>undefined
+  host.humanTasks.offer=()=>assert.fail('no authorization on discovery or stale input')
+  host.runtime.previewHumanCommand=async()=>({output:'schema',failed:false})
+  assert.equal((await Host.prototype.humanCommand.call(host,sessionId,command)).output,'schema')
+  host.runtime.previewHumanCommand=async()=>{host.humanTasks.current=()=>({});return {delegation:{action:command.name}}}
+  await assert.rejects(Host.prototype.humanCommand.call(host,sessionId,{...command,verb:'call',input:'{}'}),/originating user request changed/)
+})
+
+test('manual Human authorization retains its existing grant and execution route',async()=>{
+  const {host}=fixture(),grant={id:'manual'},command={principal:'human',connection:'business',verb:'call',name:'future.publish',input:'{}'}
+  host.humanTasks.forCommand=()=>({message,grant})
+  host.runtime.previewHumanCommand=()=>assert.fail('manual grant already exists')
+  host.runtime.humanCommand=async(_id,c,_signal,current,g)=>{assert.equal(c,command);assert.equal(current(),true);assert.equal(g,grant);return {output:'manual receipt'}}
+  assert.equal((await Host.prototype.humanCommand.call(host,sessionId,command)).output,'manual receipt')
+})

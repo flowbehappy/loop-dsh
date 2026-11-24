@@ -113,15 +113,18 @@ export async function prepareChannelJourney(api, workspace, service, sessionId, 
           case 1:return tool('collaboration_prepare',{targetIds:[assignee]})
           case 2:
             assert.ok(previous.includes('not-in-channel') && previous.includes(assignee),previous)
-            return call('channel.human-member-add',{channelId:recoveryChannel.id,memberId:assignee})
-          case 3:return call('channel.members',{channelId:recoveryChannel.id})
-          case 4:
+            return tool('bash',{command:'loop-proxy human schema channel.human-member-add'})
+          case 3:
+            assert.ok(previous.includes('channel.human-member-add'),previous)
+            return tool('bash',{command:'loop-proxy human call channel.human-member-add '+JSON.stringify({channelId:recoveryChannel.id,memberId:assignee}),description:'Invite the requested Human to the shared task board'})
+          case 4:return call('channel.members',{channelId:recoveryChannel.id})
+          case 5:
             assert.ok(previous.includes(assignee),previous)
             return call('task.create',{board:recoveryChannel.id,tasks:[{title:recoveryTitle,assignee}]})
-          case 5:
+          case 6:
             assert.ok(previous.includes('tsk_'),previous)
             return call('task.get',{taskId:previous.match(/tsk_[a-z0-9]+/u)[0]})
-          case 6:assert.ok(previous.includes(assignee) && previous.includes(recoveryTitle),previous);return
+          case 7:assert.ok(previous.includes(assignee) && previous.includes(recoveryTitle),previous);return
         }
       }
       if(step++===0){
@@ -152,7 +155,7 @@ export async function prepareChannelJourney(api, workspace, service, sessionId, 
     },
     async verifyTurn(){
       if(error)throw error
-      assert.equal(step,scenarios[index].memberRecovery?7:scenarios[index].fallback?3:2)
+      assert.equal(step,scenarios[index].memberRecovery?8:scenarios[index].fallback?3:2)
       assert.equal(offers,scenarios[index].memberRecovery || scenarios[index].delegated || !scenarios[index].join && !scenarios[index].task && scenarios[index].id && scenarios[index].id!==fallback ? 1:0,'Unexpected consent count at '+index)
       if (scenarios[index].join && scenarios[index].id) {
         const members = await peerAPI('GET',root+'/channels/'+selfJoin.id+'/members')

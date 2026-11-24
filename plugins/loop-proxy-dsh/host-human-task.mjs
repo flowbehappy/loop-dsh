@@ -207,10 +207,11 @@ export class HumanTaskConsent {
     }
   }
 
-  forCommand(sessionId,command) {
+  forCommand(sessionId,command,optional = false) {
     const message = this.current(sessionId)
     const grant = message && this.approved.get(message)
     if (!grant || command.connection !== grant.policy.connection) {
+      if (optional) return undefined
       throw refusal("Use the assistant for ordinary work. Explicit personal tasks must first authorize the exact action from this user turn.")
     }
     return {message,grant}

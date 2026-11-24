@@ -26,7 +26,10 @@
         "independent authorized calls after rejection",
         "Human and Agent membership evidence, full pagination and denied reads",
         "structured redacted errors through tool boundary",
-        "Missing Human: bound-board preflight, scoped consent on a shareable business board, one assigned task, recipient readback and unchanged private telemetry"
+        "Missing Human: bound-board preflight, scoped consent on a shareable business board, one assigned task, recipient readback and unchanged private telemetry",
+        "explicit Human schema discovery before consent",
+        "generic Human call derives authorization from arguments without trying an Agent write",
+        "manual authorization compatibility and stale-request rejection"
       ],
       "note": "Model chooses the sequence. Deterministic DSH fixture verifies API mechanics, not model autonomy."
     },

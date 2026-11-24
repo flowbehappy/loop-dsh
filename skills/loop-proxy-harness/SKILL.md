@@ -33,7 +33,8 @@ tools; guides provide reference material, not permission to act. Choose the
 operations and their order to satisfy the request. Loop enforces resource access.
 A rejected operation does not disable other authorized operations.
 
-For a call that needs Human authorization, the Host presents the exact scope and
+For explicitly personal work, use `loop-proxy human schema` and `loop-proxy human call` (`human-apps`
+for Apps). For a call that needs Human authorization, the Host presents the exact scope and
 returns after the decision. A schema describing authorization is not a pending
 approval. Errors retain protocol codes and outcome uncertainty; inspect receipts
 before repeating an uncertain write. Reuse the API's retry identity for the same

@@ -1602,6 +1602,25 @@ export class LoopHostRuntime {
     })
   }
 
+  async previewHumanCommand(sessionId, command, signal) {
+    return this.withConnectionLease(signal, async () => {
+      const {workspace} = await this.businessWorkspace(sessionId)
+      if (command.principal !== "human" || command.connection !== (command.name.startsWith("app.") ? "apps" : "business")) {
+        throw failure("loop-host/invalid-request", "Select the action's Human business or Apps connection explicitly")
+      }
+      const result = await this.actions.agentSchema({workspaceId:workspace.id, sessionId, accountPrincipal:this.accountPrincipal,
+        name:command.name, personalSchema:true,
+        ...(command.verb === "call" ? {delegationArguments:JSON.parse(command.input)} : {})},signal)
+      if (command.verb === "call") {
+        if (result?.delegation?.action !== command.name) throw failure("loop-host/backend-invalid", "Loop did not confirm the requested personal action")
+        return {...result,owner:{serviceBaseUrl:this.serviceBaseUrl,accountPrincipal:this.accountPrincipal,loopWorkspaceId:this.loopWorkspaceId}}
+      }
+      if (result?.id !== command.name && result?.action !== command.name) throw failure("loop-host/backend-invalid", "Loop did not return the requested personal action schema")
+      const {outputSchema,...inputSchema} = result
+      return {failed:false,output:boundedJSON(JSON.parse(command.input || "{}").includeOutput ? result : inputSchema)}
+    })
+  }
+
   async humanCommand(sessionId, command, signal, hasCurrentUserInput, taskGrant) {
     return await this.withConnectionLease(signal, async () => {
       const {workspace} = await this.businessWorkspace(sessionId)

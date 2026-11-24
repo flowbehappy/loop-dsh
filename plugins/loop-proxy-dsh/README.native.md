@@ -126,3 +126,10 @@ identities.
 ## License
 
 Released under the [Apache License 2.0](https://github.com/flowbehappy/loop-dsh/blob/main/LICENSE). See the `LICENSE` file shipped in this package. Third-party dependencies keep their own licenses.
+
+Explicit personal operations can use `loop-proxy human schema <action>` and
+`loop-proxy human call <action> <JSON>` (`human-apps` for Apps). Discovery does not
+request consent. The call uses Loop's public delegation preview to derive the
+exact policy, then executes the same arguments after confirmation. The requested action is not
+attempted as the Agent on this path. Existing manual `authorize` connections
+retain their behavior.

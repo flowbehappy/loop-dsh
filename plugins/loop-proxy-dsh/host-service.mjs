@@ -459,10 +459,19 @@ export default class LoopHostService extends TypertRemoteService {
     return this.runtime.canUseAgentActions()
   }
 
-  async humanCommand(sessionId, command, signal) {
+  async humanCommand(sessionId, command, signal, description) {
     if (command.verb === "authorize") return this.humanTasks.authorize(sessionId, command, signal)
-    const task = this.humanTasks.forCommand(sessionId, command)
-    return this.runtime.humanCommand(sessionId, command, signal, () => this.humanTasks.current(sessionId) === task.message, task.grant)
+    const task = this.humanTasks.forCommand(sessionId, command, true)
+    if (task) return this.runtime.humanCommand(sessionId, command, signal, () => this.humanTasks.current(sessionId) === task.message, task.grant)
+    if (!["schema","call"].includes(command.verb)) return this.humanTasks.forCommand(sessionId, command)
+    const message = this.humanTasks.current(sessionId)
+    if (command.verb === "call" && !this.humanTasks.canOffer(message)) throw new Error("Human authorization requires a current user request.")
+    const preview = await this.runtime.previewHumanCommand(sessionId, command, signal)
+    if (command.verb === "schema") return preview
+    if (this.humanTasks.current(sessionId) !== message) throw new Error("The originating user request changed.")
+    const input = preview.delegationArguments ? JSON.stringify(preview.delegationArguments) : command.input
+    const grant = await this.humanTasks.offer(sessionId,message,preview.owner,preview.delegation,description,signal,input,false)
+    return this.runtime.humanCommand(sessionId,{...command,input},signal,() => this.humanTasks.current(sessionId) === message,grant)
   }
 
   humanTaskEvents({sessionId}, signal) {

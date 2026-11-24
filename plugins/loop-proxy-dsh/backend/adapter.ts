@@ -360,6 +360,9 @@ export class NativeHostActions {
       case "agentAction": {
         if(action==="agentAction" && (!input.workspaceId || !input.sessionId))throw new LoopError("loop-host/invalid-request","Host Workspace and Session are required")
         if (action==="agentSchema" && input.personalSchema === true) {
+          if (input.delegationArguments !== undefined) {
+            return this.backend.prepareDelegation(context,input.name,input.delegationArguments,combined)
+          }
           try {
             const domain = input.name.split(".")[0]
             const catalog = await this.backend.catalog(context,combined,domain,true)

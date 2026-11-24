@@ -1331,3 +1331,23 @@ test('account status explains unknown refresh and does not replay the refresh to
   for(let i=0;i<2;i++)assert.deepEqual(await runtime.accountStatus('workspace'),{state:'needs_auth',accountPrincipal:'principal',workspaceId:'workspace',reason:'refresh_outcome_unknown'})
   assert.equal(calls,1)
 })
+
+test('explicit personal call previews exact arguments through the public endpoint without invoking an Agent action',async t=>{
+  const {NativeHostActions}=await import('../backend/adapter.ts')
+  const {LoopHostRuntime}=await import('../host-runtime.mjs')
+  const received=[],args={opaque:{target:'unchanged'},requestId:'same'}
+  const f=await fixture(t,async(req,res)=>{
+    assert.equal(req.method,'POST');assert.match(req.url,/\/actions\/future.publish\/delegation-preview$/)
+    let raw='';for await(const b of req)raw+=b;received.push(JSON.parse(raw))
+    res.end(JSON.stringify({action:'future.publish',resourceConstraints:['future:exact'],workspaceWide:false,write:true,manage:false}))
+  })
+  await f.credentials.publish({...f.value,scope:'offline_access'})
+  const adapter=new NativeHostActions({stateHome:f.root+'/host',serviceBaseUrl:f.base,loopWorkspaceId:'workspace',installationId:'installation',pageOrigin:f.base,syncProfile:'test',accountPrincipal:'principal'},{provider:f.provider})
+  t.after(()=>adapter.dispose())
+  const host={withConnectionLease:(_s,fn)=>fn(),businessWorkspace:async()=>({workspace:{id:'local'}}),accountPrincipal:'principal',serviceBaseUrl:f.base,loopWorkspaceId:'workspace',actions:{agentSchema:(input,signal)=>adapter.request('agentSchema',input,signal)}}
+  const command={principal:'human',connection:'business',verb:'call',name:'future.publish',input:JSON.stringify(args)}
+  const result=await LoopHostRuntime.prototype.previewHumanCommand.call(host,'session',command)
+  assert.deepEqual(received,[args]);assert.equal(result.delegation.action,command.name);assert.equal(result.owner.loopWorkspaceId,'workspace')
+  await assert.rejects(LoopHostRuntime.prototype.previewHumanCommand.call(host,'session',{...command,connection:'apps'}),/connection explicitly/)
+  assert.equal(received.length,1)
+})
