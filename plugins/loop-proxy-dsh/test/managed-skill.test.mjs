@@ -28,6 +28,7 @@ test("official prompt assembly includes the assistant role before Skill loading 
     assert.ok(prompt.includes(before.trim()))
     assert.match(prompt, /personal assistant \(Super Agent\)/u)
     assert.match(prompt, /connected assistant.s permissions/u)
+    assert.match(prompt, /never inspect local credentials/u)
     assert.deepEqual(assembly.contexts, [])
     assert.deepEqual(assembly.tools, [])
     dispose()

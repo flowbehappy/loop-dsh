@@ -2893,7 +2893,7 @@ test("empty exact action discovery diagnoses permissions without inventing login
     const inputSchema = {type: "object", required: ["channelId", "memberId"]}
     runtime.actions.agentSchema = async () => ({
       error: {code: "unknown_action"},
-      delegation: {action: "channel.human-member-add", inputSchema},
+      delegation: {action: "channel.human-member-add", inputSchema, summary:"Add a channel member",description:"Resolve members with the authorized directory.",readOnly:false,idempotency:"none"},
     })
     for (const verb of ["schema", "actions"]) {
       const descriptor = await runtime.agentCommand("session-one", {verb, name: "channel.human-member-add"}, undefined, true)
@@ -2902,6 +2902,10 @@ test("empty exact action discovery diagnoses permissions without inventing login
       assert.equal(published.id, "channel.human-member-add")
       assert.equal(published.requiresHumanAuthorization, true)
       assert.deepEqual(published.inputSchema, inputSchema)
+      assert.equal(published.summary, "Add a channel member")
+      assert.equal(published.description, "Resolve members with the authorized directory.")
+      assert.equal(published.readOnly, false)
+      assert.equal(published.idempotency, "none")
       assert.equal(published.error, undefined)
     }
 

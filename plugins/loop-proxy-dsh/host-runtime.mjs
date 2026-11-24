@@ -1776,6 +1776,7 @@ export class LoopHostRuntime {
     const permissionResult = ({error,delegation,delegationArguments,channelLabel}) => command.verb === "call"
       ? {failed:true,output:boundedJSON({error}),delegation,delegationArguments,channelLabel,agentDenied:error?.code!=="human_confirmation_required"}
       : {failed:false,output:boundedJSON({id:command.name,requiresHumanAuthorization:true,inputSchema:delegation.inputSchema,
+          summary:delegation.summary,description:delegation.description,readOnly:delegation.readOnly,idempotency:delegation.idempotency,
           next:"For the user's requested operation, use loop-proxy call with these concrete arguments. The Host asks the user for approval in this conversation."})}
     if (command.verb === "actions") {
       const result = await this.actions.agentCatalog({

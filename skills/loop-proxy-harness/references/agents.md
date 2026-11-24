@@ -3,6 +3,10 @@
 Reading this guide exposes collaboration tools for this turn only. For later
 Loop work, read it or the tasks guide again to expose the tools on demand.
 
+For creating or configuring Agents, discover `agent.` actions and read
+`agent.options` for runner, runtime and model choices when available.
+Use the selected action’s authorization path and distinguish creation from readiness.
+
 ## Choose the collaboration surface
 
 Loop Agents are workspace identities, distinct from local DSH subagents. For
