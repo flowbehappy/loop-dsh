@@ -507,61 +507,70 @@ async function verifySongAssignment({
     async (c) => c.defaultChannelId
   )
   assert.ok(board)
-  const musician = await worker('wan_imac_ds_001')
-  await api('POST', root + '/channels/' + board + '/members/batch', {
-    members: [{ agentId: musician.agent.id, visibility: 'public' }]
-  })
-  const selected = await directory(musician, musicSession)
-  const boardTasks = () => api('GET', root + '/channels/' + board + '/tasks')
-  const before = new Set((await boardTasks()).rows.map((t) => t.id))
-  await ctx.sessionController.prompt(
-    {
-      sessionId: musicSession,
-      requestId: randomUUID(),
-      content: [{ type: 'text', text: '你让 ' + selected.mention + ' 写首小曲看看。' }]
-    },
-    AbortSignal.timeout(20000)
-  )
-  const musicTask = await until('the single-Agent request did not create its task', async () => {
-    const added = (await boardTasks()).rows.filter((t) => !before.has(t.id))
-    assert.ok(added.length <= 1, 'duplicate song tasks')
-    return added[0]
-  })
-  const detail = (await api('GET', root + '/tasks/' + musicTask.id)).detail.task
-  assert.equal(detail.assigneeProfile.memberId, selected.member)
-  const scopeId = detail.taskScopeId || musicTask.taskScopeId || musicTask.id
-  assert.match(scopeId, /^tsk_/)
-  const taskTarget = '#' + scopeId
-  const musicHistory = await musician.history(taskTarget)
-  assert.ok(musicHistory.ok)
-  const history = await musicHistory.json()
-  const song = await provider.reply(
-    '你是接单的作曲者。根据任务写一段原创的四小节旋律，用数字简谱、节拍和小节线表达。',
-    [detail.title, detail.description]
-  )
-  assert.match(song, /[1-7]/)
-  const musicReceipt = 'M-' + randomUUID().slice(0, 8)
-  const content = song.trim() + '\n[' + musicReceipt + ']'
-  const sent = await musician.send({
-    target: taskTarget,
-    content,
-    clientMessageId: randomUUID(),
-    freshness: {
-      targetKey: history.targetKey,
-      seenUpToSeq: history.coversThroughSeq ?? 0
-    }
-  })
-  assert.ok(sent.ok, 'musician send HTTP ' + sent.status)
-  await sent.body?.cancel()
-  await until('music feedback did not reach the original assignment Session', async () =>
-    receipts.some((r) => r.id === musicSession && r.type === 'user/message' && r.text.includes(musicReceipt))
-  )
-  const recheck = await musician.history(taskTarget)
-  assert.ok(recheck.ok)
-  assert.equal((await recheck.json()).messages.filter((m) => m.content === content).length, 1)
-  assert.equal((await boardTasks()).rows.filter((t) => !before.has(t.id)).length, 1)
-  assert.ok(
-    !receipts.some((r) => r.id !== musicSession && r.type === 'user/message' && r.text.includes(musicReceipt))
-  )
-  return { songTask: musicTask.id, musicSession }
+  const clarifications = []
+  const offQuestions = ctx.on('user-questions/request', async (request, next) => {
+    if (request.agent?.session?.id !== musicSession) return next()
+    const answer = '音乐风格和长度由你决定，交付文本简谱即可。继续交给我原先指定的 Agent；授权须通过 Loop 授权卡确认。'
+    clarifications.push({questions:request.questions.map(q=>q.question),answer})
+    return {answers:request.questions.map(q=>({id:q.id,selected:[],custom:answer}))}
+  }, {prepend:true})
+  try {
+    const musician = await worker('wan_imac_ds_001')
+    await api('POST', root + '/channels/' + board + '/members/batch', {
+      members: [{ agentId: musician.agent.id, visibility: 'public' }]
+    })
+    const selected = await directory(musician, musicSession)
+    const boardTasks = () => api('GET', root + '/channels/' + board + '/tasks')
+    const before = new Set((await boardTasks()).rows.map((t) => t.id))
+    await ctx.sessionController.prompt(
+      {
+        sessionId: musicSession,
+        requestId: randomUUID(),
+        content: [{ type: 'text', text: '你让 ' + selected.mention + ' 写首小曲看看。' }]
+      },
+      AbortSignal.timeout(20000)
+    )
+    const musicTask = await until('the single-Agent request did not create its task', async () => {
+      const added = (await boardTasks()).rows.filter((t) => !before.has(t.id))
+      assert.ok(added.length <= 1, 'duplicate song tasks')
+      return added[0]
+    })
+    const detail = (await api('GET', root + '/tasks/' + musicTask.id)).detail.task
+    assert.equal(detail.assigneeProfile.memberId, selected.member)
+    const scopeId = detail.taskScopeId || musicTask.taskScopeId || musicTask.id
+    assert.match(scopeId, /^tsk_/)
+    const taskTarget = '#' + scopeId
+    const musicHistory = await musician.history(taskTarget)
+    assert.ok(musicHistory.ok)
+    const history = await musicHistory.json()
+    const song = await provider.reply(
+      '你是接单的作曲者。根据任务写一段原创的四小节旋律，用数字简谱、节拍和小节线表达。',
+      [detail.title, detail.description]
+    )
+    assert.match(song, /[1-7]/)
+    const musicReceipt = 'M-' + randomUUID().slice(0, 8)
+    const content = song.trim() + '\n[' + musicReceipt + ']'
+    const sent = await musician.send({
+      target: taskTarget,
+      content,
+      clientMessageId: randomUUID(),
+      freshness: {
+        targetKey: history.targetKey,
+        seenUpToSeq: history.coversThroughSeq ?? 0
+      }
+    })
+    assert.ok(sent.ok, 'musician send HTTP ' + sent.status)
+    await sent.body?.cancel()
+    await until('music feedback did not reach the original assignment Session', async () =>
+      receipts.some((r) => r.id === musicSession && r.type === 'user/message' && r.text.includes(musicReceipt))
+    )
+    const recheck = await musician.history(taskTarget)
+    assert.ok(recheck.ok)
+    assert.equal((await recheck.json()).messages.filter((m) => m.content === content).length, 1)
+    assert.equal((await boardTasks()).rows.filter((t) => !before.has(t.id)).length, 1)
+    assert.ok(
+      !receipts.some((r) => r.id !== musicSession && r.type === 'user/message' && r.text.includes(musicReceipt))
+    )
+    return { songTask: musicTask.id, musicSession, clarifications }
+  } finally { offQuestions() }
 }

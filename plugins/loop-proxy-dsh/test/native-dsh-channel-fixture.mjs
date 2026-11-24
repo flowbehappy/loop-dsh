@@ -70,6 +70,14 @@ export async function prepareChannelJourney(api, workspace, service, sessionId, 
     {prompt:'@'+peerName+' 给这位同事创建一个测试任务。',memberRecovery:true,id:recoveryChannel.id},
   ]
   let index=0,step=0,error,offers=0
+  let lastFailure
+  const agentCommand=service.runtime.agentCommand.bind(service.runtime)
+  service.runtime.agentCommand=async(...args)=>{
+    try{return await agentCommand(...args)}catch(e){
+      lastFailure={scenario:index,code:e.code,status:e.status,serverCode:e.serverCode,outcomeUnknown:e.outcomeUnknown,message:e.message}
+      throw e
+    }
+  }
   const consume=(async()=>{
     for await(const f of service.humanTaskEvents({sessionId},signal)){
       if(f.state==='idle')continue
@@ -145,7 +153,7 @@ export async function prepareChannelJourney(api, workspace, service, sessionId, 
           assert.equal(previous.includes('This page cannot establish who else spoke'),s.id===fallback,'History must identify the reader')
           if(s.text!==other)assert.ok(!previous.includes(other))
         }else{
-          assert.match(previous,s.expect)
+          assert.match(previous,s.expect,JSON.stringify(lastFailure))
           assert.ok(!previous.includes(marker) && !previous.includes(other))
         }
         if(s.fallback)return tool('bash',{command:fallbackCall,description:'Try another channel'})
@@ -185,7 +193,8 @@ export async function prepareChannelJourney(api, workspace, service, sessionId, 
         assert.equal(detail.task.assigneeProfile.memberId,assignee)
         assert.equal(detail.task.channelId,recoveryChannel.id)
       }
-      index++;step=0;offers=0
+      index++;step=0;offers=0;lastFailure=undefined
+      if(index===scenarios.length)service.runtime.agentCommand=agentCommand
     },
   }
 }
