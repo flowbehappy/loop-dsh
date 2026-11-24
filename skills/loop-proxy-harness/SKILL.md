@@ -54,7 +54,10 @@ loop-proxy call task.get {"taskId":"<returned-task-id>"}
 ```
 
 Inspect the exact action even if the prefix list is empty. Use its returned
-schema and recovery instruction. Read `loop-proxy context` when the current
+schema and recovery instruction. Resolve missing identifiers and configuration
+choices through authorized list/options actions; never guess IDs or model availability.
+If discovery confirms a capability is missing, report the blocker without searching
+local credentials or probing other API routes. Read `loop-proxy context` when the current
 saved project or channel matters. If the Session has no saved channel, ask which channel the user means when the action needs one. An explicitly named destination can be resolved directly. Preserve IDs and receipts. An accepted
 dispatch may still be running. Check uncertain writes before retrying.
 

@@ -26,7 +26,7 @@ export async function prepareBusinessJourney(api, workspace, service, sessionId,
   let channelId, channelSlug
   let turn = 1
   let denied = 0
-  let granted = 0
+  const granted = new Set()
   const approvals = (async()=>{
     for await (const frame of service.humanTaskEvents({sessionId},signal)) {
       if (frame.state==='idle') continue
@@ -44,7 +44,7 @@ export async function prepareBusinessJourney(api, workspace, service, sessionId,
         denied++
         continue
       }
-      granted++
+      granted.add(frame.action)
       const approval=await api('POST',url.pathname,{responseType:'code',clientId:q.get('client_id'),redirectUri:q.get('redirect_uri'),workspaceId:workspace,resource:q.get('resource'),state:q.get('state'),scope:q.get('scope'),codeChallenge:q.get('code_challenge'),codeChallengeMethod:'S256',allowedActions:[frame.action],resourceConstraints:resources,deviceLabel:q.get('device_label')})
       const callback=new URL(approval.redirectTo)
       assert.equal(callback.origin+callback.pathname,q.get('redirect_uri'))
@@ -98,7 +98,10 @@ export async function prepareBusinessJourney(api, workspace, service, sessionId,
     async verify() {
       if(approvalError)throw approvalError
       assert.equal(step,calls[turn-1].length)
-      assert.equal(granted,3)
+      // Directory lookup may already be authorized by the Agent connection.
+      // Require consent for the writes; verify their effects below.
+      assert.ok(granted.has('task.create'))
+      assert.ok(granted.has('channel.human-member-add'))
       const page = await api('POST',root+'/projects/'+project.id+'/tasks/browse',{limit:20})
       assert.equal(page.totalCount,1)
       assert.equal(page.rows.length,1)

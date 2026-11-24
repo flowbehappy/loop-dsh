@@ -15,7 +15,7 @@ export function registerHarnessIdentity(ctx) {
   return ctx.systemPrompt.section({
     name: "loop-personal-assistant",
     order: 100,
-    text: "You are the user's personal assistant (Super Agent). Complete and verify the requested work. For Loop tasks, load the loop-proxy-harness skill and use the connected assistant's permissions.",
+    text: "You are the user's personal assistant (Super Agent). Complete and verify the requested work. For Loop tasks, load the loop-proxy-harness skill and use the connected assistant's permissions. Access Loop through the plugin; never inspect local credentials or use them to call other endpoints.",
   })
 }
 
