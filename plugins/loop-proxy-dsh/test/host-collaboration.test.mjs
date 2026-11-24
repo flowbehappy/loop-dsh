@@ -274,33 +274,6 @@ test("natural-language selection reuses durable user intent and the saved channe
   await assert.rejects(f.tool("collaboration_prepare").execute(args, f.exec), /current accepted user/u)
 })
 
-test("a rejected dispatch cannot become an unassigned task through the generic action", async () => {
-  const f = naturalSelectionFixture({async collaborationAction() { throw new Error("assignee cannot see task") }})
-  await f.claim()
-  await f.tool("collaboration_prepare").execute({targetIds:["mem_a"]}, f.exec)
-  await assert.rejects(f.tool("collaboration_dispatch").execute({tasks:[{title:"Review",assignee:"mem_a"}]}, f.exec))
-  const command = title => ({verb:"call",name:"task.create",input:JSON.stringify({tasks:[{title}]})})
-  assert.throws(()=>f.collaboration.checkDispatchRetry(SESSION_ID,command("Review")),/original dispatch/)
-  f.collaboration.checkDispatchRetry(SESSION_ID,command("Separate task"))
-  f.emit("session/event", f.agent.session, {type:"turn/end"})
-  f.collaboration.checkDispatchRetry(SESSION_ID,command("Review"))
-})
-
-test("a named-channel attempt blocks duplicate and alternate writes for that task in this turn", async () => {
-  const f = naturalSelectionFixture()
-  await f.claim()
-  const tasks = [{title:"Design review",assignee:"mem_a"}]
-  const command = params => ({verb:"call",name:"task.create",input:JSON.stringify(params)})
-  const named = command({channelName:"Design",tasks})
-  f.collaboration.checkDispatchRetry(SESSION_ID,named,true)
-  assert.throws(()=>f.collaboration.checkDispatchRetry(SESSION_ID,named,true),/original board/)
-  assert.throws(()=>f.collaboration.checkDispatchRetry(SESSION_ID,command({tasks})),/original board/)
-  await assert.rejects(f.tool("collaboration_dispatch").execute({tasks},f.exec),/original board/)
-  assert.equal(f.calls.filter(([name])=>name==="action").length,0)
-  f.emit("session/event", f.agent.session, {type:"turn/end"})
-  f.collaboration.checkDispatchRetry(SESSION_ID,named)
-})
-
 test("a cached preparation revalidates the route without replaying an intent", async () => {
   const f = naturalSelectionFixture()
   await f.claim()

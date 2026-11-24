@@ -14,6 +14,11 @@ export async function verifyProjectResourceJourney({
   workerMember,
   sessionId
 }) {
+  // This journey deliberately exercises owner consent, not the default grant.
+  const initialSettings = '/api/v1/me/personal-assistants/' + workspace
+  const initial = (await api('PUT', initialSettings)).assistant
+  const {resource: _resource, ...permissions} = initial.permissions
+  await api('PUT', initialSettings + '/permissions', {revision: initial.revision, permissions})
   const root = '/api/v1/workspaces/' + workspace
   const project = (
     await api('POST', root + '/projects?envelope=container', {

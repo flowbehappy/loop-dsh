@@ -66,3 +66,15 @@ LOOP_TS_E2E_LIVE_TOPIC=1 LOOP_TEST_MODEL_FILE=/absolute/path/to/test-key \
 若刷新请求已经发出但结果未知，不重发旧 refresh token。用户点击登录并在 Loop 确认恢复后，插件通过公开的 credential-recoveries 协议更新原连接 token。交换与保存使用现有跨进程凭据锁，保留账户、grant、device、generation 和页面证明；原订阅回读新凭据后继续重试。取消或丢响应仍保留 unknown，下一次需要新的确认，不重放 recovery code。原授权已撤销、设备不匹配或服务端不支持恢复时明确提示退出后重新登录，不自动替换授权并接续旧会话。
 
 自动化入口见场景目录的 `connection-recovery`。协议故障注入、真实 Loop 恢复、真实模型协作与实际 macOS 合盖／换网分别记录；自动化时钟跳变不等于实际合盖验收。
+
+## 通用插件回归
+
+插件不按自然语言猜测参数，也不用任务标题或某次失败锁住后续操作。通过当前 schema、精确授权、结构化错误和 API 回执建立通用调用链。保留已公开的专用工具。成员预检同时覆盖 Human 和 Agent；测试业务共享频道与 Host 私密历史频道分开，回归还要验证原同步未受影响。
+
+设置上面的隔离服务、官方 DSH 路径、测试模型密钥，并指定新的 `LOOP_TEST_EVIDENCE_DIR` 后，可执行全部真实模型业务分组：
+
+```sh
+node plugins/loop-proxy-dsh/test/run-live-business.mjs
+```
+
+每组安装当前包，独立建立合成账号和 DSH Home；记录第一轮结果并逐项通过 Loop 规范 API 回读。某一组失败后仍执行其余组，任何失败或缺失证据都会令汇总返回非零。`human-membership` 包含 Session 3f1fed97 的缺失 Human 成员问题。HTTP 错误保留公共 code、hint、参数校验及结果不确定性，同时过滤凭据和未公开字段。

@@ -11,6 +11,26 @@
   ],
   "suites": [
     {
+      "id": "generic-plugin-contract",
+      "automation": [
+        "plugins/loop-proxy-dsh/test/generic-plugin-contract.test.mjs",
+        "plugins/loop-proxy-dsh/test/native-dsh-runtime.test.mjs"
+      ],
+      "environment": {
+        "LOOP_TS_E2E_CHANNEL": "1"
+      },
+      "sourceSession": "session-3f1fed97-e5ef-4139-bbe9-3313d387889a",
+      "coverage": [
+        "future API discovery and unchanged opaque input",
+        "same authorization flow for previously unknown actions",
+        "independent authorized calls after rejection",
+        "Human and Agent membership evidence, full pagination and denied reads",
+        "structured redacted errors through tool boundary",
+        "Missing Human: bound-board preflight, scoped consent on a shareable business board, one assigned task, recipient readback and unchanged private telemetry"
+      ],
+      "note": "Model chooses the sequence. Deterministic DSH fixture verifies API mechanics, not model autonomy."
+    },
+    {
       "id": "channel-consent",
       "automation": "plugins/loop-proxy-dsh/test/native-dsh-runtime.test.mjs",
       "environment": {
@@ -552,13 +572,70 @@
             "checkpoint": "scheduled-delivery"
           }
         ]
+      },
+      {
+        "id": "human-membership",
+        "checkpoints": [
+          {
+            "id": "live.human-membership.human-missing-from-board",
+            "checkpoint": "human-missing-from-board"
+          }
+        ],
+        "sourceSession": "session-3f1fed97-e5ef-4139-bbe9-3313d387889a",
+        "level": "real-model-dsh",
+        "preconditions": "Named shared business channel includes the assistant but not the target Human; separate Host private-history channel."
+      },
+      {
+        "id": "directory",
+        "level": "real-model-dsh",
+        "checkpoints": [
+          {
+            "id": "live.directory.named-project",
+            "checkpoint": "named-project"
+          },
+          {
+            "id": "live.directory.owner-directory",
+            "checkpoint": "owner-directory"
+          }
+        ]
+      },
+      {
+        "id": "conversation",
+        "level": "real-model-dsh",
+        "preconditions": "Reply thread parent is visible only to the Human; exact consent, reaction and DM readback.",
+        "checkpoints": [
+          {
+            "id": "live.conversation.thread-reply",
+            "checkpoint": "thread-reply"
+          },
+          {
+            "id": "live.conversation.thread-read",
+            "checkpoint": "thread-read"
+          },
+          {
+            "id": "live.conversation.reaction-add",
+            "checkpoint": "reaction-add"
+          },
+          {
+            "id": "live.conversation.reaction-remove",
+            "checkpoint": "reaction-remove"
+          },
+          {
+            "id": "live.conversation.named-dm",
+            "checkpoint": "named-dm"
+          },
+          {
+            "id": "live.conversation.dm-readback",
+            "checkpoint": "dm-readback"
+          }
+        ]
       }
     ]
   },
   "loopHttp": {
     "repository": "Loop",
     "idPrefix": "loop.",
-    "preconditions": "latest main, isolated 2 GiB TiDB, explicit external test DSN",
+    "preconditions": "latest main, isolated database, explicit external test DSN; apply the operator’s local memory policy",
     "command": "go test -tags=e2e -p 1 ./e2e/scenarios/... -run ^<test>$ -parallel 1 -count=1",
     "expected": "all assertions pass; report every skip/failure independently",
     "tests": [

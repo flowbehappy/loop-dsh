@@ -46,6 +46,11 @@ export async function prepareChannelJourney(api, workspace, service, sessionId, 
   assert.ok(publicInvite.path.includes('/channel-invites/'))
   const {assistant} = await api('PUT','/api/v1/me/personal-assistants/'+workspace)
   await api('POST',root+'/channels/'+target.id+'/members/batch',{members:[{userId:peer.user.id}]})
+  // Use a shareable business channel; a Host history channel intentionally
+  // becomes ineligible for private telemetry when another Human joins.
+  const recoveryChannel = await create('member-recovery-'+randomUUID().slice(0,8))
+  await api('POST',root+'/channels/'+recoveryChannel.id+'/members/batch',{members:[{agentId:assistant.agentId,visibility:'private'}]})
+  const recoveryTitle = "Human membership recovery "+randomUUID()
   const scenarios=[
     {prompt:channelQuestion,name:'Loop in Loop',id:target.id,deny:true,expect:/declined/i,fallback:true},
     {prompt:'重新申请刚才频道的只读授权。',name:'Loop in Loop',id:target.id,text:marker},
@@ -62,6 +67,7 @@ export async function prepareChannelJourney(api, workspace, service, sessionId, 
     {prompt:'在同名评审频道给同事建任务。',name:'同名评审',task:createTask,expect:/several channels/i},
     {prompt:'请申请授权，在 Loop in Loop 频道给这位同事建任务。',name:'Loop in Loop',task:{...createTask,title:title+' human'},id:target.id,delegated:true},
     {prompt:'在 Loop in Loop 频道给我指定的同事建任务。',name:'Loop in Loop',task:createTask,id:target.id},
+    {prompt:'@'+peerName+' 给这位同事创建一个测试任务。',memberRecovery:true,id:recoveryChannel.id},
   ]
   let index=0,step=0,error,offers=0
   const consume=(async()=>{
@@ -69,17 +75,18 @@ export async function prepareChannelJourney(api, workspace, service, sessionId, 
       if(f.state==='idle')continue
       const scenario=scenarios[index]
       offers++
-      const action = scenario.delegated ? 'task.create' : 'message.history'
+      const action = scenario.memberRecovery ? 'channel.human-member-add' : scenario.delegated ? 'task.create' : 'message.history'
+      const resources = ['channel:'+scenario.id,...(scenario.memberRecovery ? ['workspace-member:'+assignee] : [])]
       assert.equal(f.action,action)
-      assert.deepEqual(f.resources,['channel:'+scenario.id])
-      assert.equal(f.manage,false)
+      assert.deepEqual([...f.resources].sort(),resources.sort())
+      assert.equal(f.manage,Boolean(scenario.memberRecovery))
       if(scenario.deny){await service.decideHumanTask({sessionId,requestId:f.requestId,decision:'cancel'},signal);continue}
       if(f.state==='reuse'){await service.decideHumanTask({sessionId,requestId:f.requestId,decision:'reuse'},signal);continue}
       const u=new URL(f.loginUrl), q=u.searchParams
       assert.equal(q.get('allowed_actions'),action)
-      assert.equal(q.get('resource_constraints'),'channel:'+scenario.id)
-      assert.doesNotMatch(q.get('scope'),/human_manage/)
-      assert.equal(q.get('scope').includes('human_write'),Boolean(scenario.delegated))
+      assert.deepEqual(q.get('resource_constraints').split(',').sort(),resources)
+      assert.equal(q.get('scope').includes('human_manage'),Boolean(scenario.memberRecovery))
+      assert.equal(q.get('scope').includes('human_write'),Boolean(scenario.delegated || scenario.memberRecovery))
       const approval=await api('POST',u.pathname,{responseType:'code',clientId:q.get('client_id'),redirectUri:q.get('redirect_uri'),workspaceId:workspace,resource:q.get('resource'),state:q.get('state'),scope:q.get('scope'),codeChallenge:q.get('code_challenge'),codeChallengeMethod:'S256',allowedActions:[action],resourceConstraints:f.resources,deviceLabel:q.get('device_label')})
       const callback=new URL(approval.redirectTo)
       assert.equal(callback.origin+callback.pathname,q.get('redirect_uri'));assert.equal(callback.hostname,'127.0.0.1')
@@ -98,6 +105,24 @@ export async function prepareChannelJourney(api, workspace, service, sessionId, 
         assert.ok(direct || menu.includes('run_code'),'DSH tool menu: '+menu.join(','))
         const parameters=direct ? args : {code:'const result = await tools.'+name+'('+JSON.stringify(args)+'); text(result)'}
         return {index:0,id:'call_channel_'+index+'_'+step,type:'function',function:{name:direct?name:'run_code',arguments:JSON.stringify(parameters)}}
+      }
+      if(s.memberRecovery) {
+        const call=(action,args)=>tool('bash',{command:'loop-proxy call '+action+' '+JSON.stringify(args),description:'Exercise membership and task APIs'})
+        switch(step++) {
+          case 0:return tool('bash',{command:'loop-proxy actions task.'})
+          case 1:return tool('collaboration_prepare',{targetIds:[assignee]})
+          case 2:
+            assert.ok(previous.includes('not-in-channel') && previous.includes(assignee),previous)
+            return call('channel.human-member-add',{channelId:recoveryChannel.id,memberId:assignee})
+          case 3:return call('channel.members',{channelId:recoveryChannel.id})
+          case 4:
+            assert.ok(previous.includes(assignee),previous)
+            return call('task.create',{board:recoveryChannel.id,tasks:[{title:recoveryTitle,assignee}]})
+          case 5:
+            assert.ok(previous.includes('tsk_'),previous)
+            return call('task.get',{taskId:previous.match(/tsk_[a-z0-9]+/u)[0]})
+          case 6:assert.ok(previous.includes(assignee) && previous.includes(recoveryTitle),previous);return
+        }
       }
       if(step++===0){
         if(s.join)return tool('loop_channel_join',{channelName:s.name})
@@ -122,14 +147,13 @@ export async function prepareChannelJourney(api, workspace, service, sessionId, 
         }
         if(s.fallback)return tool('bash',{command:fallbackCall,description:'Try another channel'})
       }else if(step===3 && s.fallback){
-        assert.match(previous,/before reading another channel/)
-        assert.ok(!previous.includes(other))
+        assert.ok(previous.includes(other),"An independent authorized read must remain available")
       }
     },
     async verifyTurn(){
       if(error)throw error
-      assert.equal(step,scenarios[index].fallback?3:2)
-      assert.equal(offers,scenarios[index].delegated || !scenarios[index].join && !scenarios[index].task && scenarios[index].id && scenarios[index].id!==fallback ? 1:0,'Unexpected consent count at '+index)
+      assert.equal(step,scenarios[index].memberRecovery?7:scenarios[index].fallback?3:2)
+      assert.equal(offers,scenarios[index].memberRecovery || scenarios[index].delegated || !scenarios[index].join && !scenarios[index].task && scenarios[index].id && scenarios[index].id!==fallback ? 1:0,'Unexpected consent count at '+index)
       if (scenarios[index].join && scenarios[index].id) {
         const members = await peerAPI('GET',root+'/channels/'+selfJoin.id+'/members')
         const added = [...members.agents,...(members.privateAgents ?? [])].filter(member=>(member.agentId ?? member.id)===assistant.agentId)
@@ -149,6 +173,14 @@ export async function prepareChannelJourney(api, workspace, service, sessionId, 
         if (scenarios[index].delegated) {
           await api('POST',root+'/channels/'+target.id+'/members/batch',{members:[{agentId:assistant.agentId,visibility:'private'}]})
         }
+      }
+      if (scenarios[index].memberRecovery) {
+        const page=await api('GET',root+'/channels/'+recoveryChannel.id+'/tasks?query='+encodeURIComponent(recoveryTitle))
+        const rows=page.rows.filter(row=>row.title===recoveryTitle)
+        assert.equal(rows.length,1)
+        const {detail}=await peerAPI('GET',root+'/tasks/'+rows[0].id)
+        assert.equal(detail.task.assigneeProfile.memberId,assignee)
+        assert.equal(detail.task.channelId,recoveryChannel.id)
       }
       index++;step=0;offers=0
     },

@@ -427,7 +427,12 @@ for(const failure of ['none','create-response','execute-response','model-respons
     // Loop rotates successfully but the Host loses the response, as during sleep.
     const rotation=await fetch(original.token_endpoint,{method:'POST',body:new URLSearchParams({grant_type:'refresh_token',refresh_token:original.refresh_token,client_id:original.client_id,resource:original.resource})})
     assert.equal(rotation.status,200);await rotation.body.cancel()
-    await store.modify(async current=>({...current,refresh_state:'unknown',refresh_operation:'simulated-lost-response',refresh_started_at:0,access_expires_at:new Date(0).toISOString()}))
+    await store.modify(async current=>{
+      // A lost response has finished its request; only an active request owns
+      // refresh_operation. Match TokenManager's finally cleanup.
+      const {refresh_operation,refresh_started_at,...settled}=current
+      return {...settled,refresh_state:'unknown',access_expires_at:new Date(0).toISOString()}
+    })
     const liveCount=()=>collaborationEvents.filter(e=>e.event.status?.state==='live').length
     const previousLive=liveCount()
     // Fault injection closes only this test's sockets, leaving their watch

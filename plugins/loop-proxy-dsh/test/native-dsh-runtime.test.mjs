@@ -13,11 +13,13 @@ const exec=promisify(execFile),runtime=process.env.LOOP_TS_E2E_DSH_BIN,base=proc
 
 // The extended browser journey runs multiple bounded model turns before checking sync.
 const extendedJourney = ['LOOP_TS_E2E_BUSINESS','LOOP_TS_E2E_CHANNEL'].some(key => process.env[key] === '1')
+const liveBusiness = process.env.LOOP_TS_E2E_LIVE_BUSINESS === '1'
 const liveTopic = process.env.LOOP_TS_E2E_LIVE_TOPIC === '1'
-if (liveTopic && (!runtime || !base || !process.env.LOOP_TEST_MODEL_FILE)) {
+if ((liveTopic || liveBusiness) && (!runtime || !base || !process.env.LOOP_TEST_MODEL_FILE)) {
   throw new Error('Live topic acceptance requires the official DSH binary, an isolated Loop Test Hub and a dedicated model key file')
 }
 function probeTimeout(method) {
+  if (method === 'browser' && liveBusiness) return 1100000
   if (method === 'browser' && liveTopic) return 600000
   return method === 'browser' && extendedJourney ? 180000 : 60000
 }
@@ -45,7 +47,10 @@ for(const method of ['browser','access-token'])test('packaged plugin signs in an
     environment.DSH_LOOP_PROXY_WORKSITE_TRUSTED_HOST=new URL(publicOrigin).host
   }
   const packageRoot=join(root,'packages/node_modules/@pingkai/loop-dsh')
-  await exec(process.execPath,[fileURLToPath(new URL('../build-native.mjs',import.meta.url)),packageRoot],{maxBuffer:4<<20})
+  const buildScript=process.env.LOOP_TS_E2E_PLUGIN_SOURCE
+    ? resolve(process.env.LOOP_TS_E2E_PLUGIN_SOURCE,'build-native.mjs')
+    : fileURLToPath(new URL('../build-native.mjs',import.meta.url))
+  await exec(process.execPath,[buildScript,packageRoot],{maxBuffer:4<<20})
   const profile=join(home,'profiles/web')
   if(process.env.LOOP_TS_E2E_INSTALL_PACKAGE==='1'){
     const packed=await exec('npm',['pack','--json','--pack-destination',root],{cwd:packageRoot,env:environment,maxBuffer:4<<20})
@@ -199,6 +204,14 @@ export async function apply(ctx){
      result.channelScenarios=channelJourney.scenarios.length
      channelJourney=undefined
    }
+   if(${JSON.stringify(method==='browser' && liveBusiness)}) {
+     const live=await import(${JSON.stringify(new URL('./live-topic-cooperation.mjs',import.meta.url).href)})
+     const {runAudit}=await import(${JSON.stringify(new URL('./live-business-journeys.mjs',import.meta.url).href)})
+     topicProvider=await live.liveTopicProvider()
+     const control=new AbortController();ctx.effect(()=>()=>control.abort())
+     await runAudit({ctx,api,workspace,sessionId:result.session.sessionId,signal:control.signal,ownerUser:registered.user})
+     control.abort();topicProvider=undefined;result.liveBusiness=true
+   }
    if(topicFixture){
      topicProvider=await topicFixture.liveTopicProvider()
      result.topic=await topicFixture.runLiveTopic({ctx,api,base,workspace,localWorkspace,oldMusicianId:freshWorkspace.oldMusicianId,sessionId:result.session.sessionId,provider:topicProvider,trace,selectedModel:{provider:group.id,model:model.id}})
@@ -269,6 +282,7 @@ export async function apply(ctx){
   assert.doesNotMatch(log,/failed to import|ENOENT.*loop-proxy/u)
   assert.doesNotMatch(log,/opening the default browser/u)
   assert.ok(result.session.sessionId)
+  if(method==='browser' && liveBusiness)assert.equal(result.liveBusiness,true)
   if(method==='browser' && process.env.LOOP_TS_E2E_BUSINESS==='1')assert.equal(result.business,true)
   if(method==='browser' && liveTopic){
     assert.equal(result.topic?.workerModelTurns,6)
@@ -280,7 +294,7 @@ export async function apply(ctx){
   }
   if(publicOrigin)assert.deepEqual(result.worksite,{relay:true,launch:true,remoteHost:true,remoteOAuth:true})
   if(base)assert.deepEqual(result.realLoop,{method,account:true,modelCatalog:true,sessionAction:true,modelStream:true,telemetrySync:true,disconnect:true})
-  if(method==="browser" && process.env.LOOP_TS_E2E_CHANNEL==="1") {assert.equal(result.channelScenarios,15);t.diagnostic("15 channel history, consent, membership and named-board task scenarios verified")}
+  if(method==="browser" && process.env.LOOP_TS_E2E_CHANNEL==="1") {assert.equal(result.channelScenarios,16);t.diagnostic("16 channel history, consent, membership and named-board task scenarios verified")}
   const worksite=publicOrigin
     ? `enabled(relay=${result.worksite?.relay===true},launch=${result.worksite?.launch===true},remoteHost=${result.worksite?.remoteHost===true},remoteOAuth=${result.worksite?.remoteOAuth===true})`
     : 'not-requested'

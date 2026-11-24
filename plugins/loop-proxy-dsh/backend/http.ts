@@ -1,6 +1,6 @@
 import {randomUUID} from "node:crypto"
 import {setTimeout as delay} from "node:timers/promises"
-import {LoopError, requireActive} from "./errors.ts"
+import {LoopError, requireActive, serverError} from "./errors.ts"
 import {HostCredentialStore} from "./credentials.ts"
 import type {Credential} from "./credentials.ts"
 
@@ -169,21 +169,11 @@ export class LoopHTTP {
       throw new LoopError("loop-host/backend-invalid", "Loop returned an incomplete or invalid response; inspect current state before retrying", response.status, method !== "GET")
     }
     if (!response.ok) {
-      const error = result?.error
-      const secrets = [credential.access_token, credential.refresh_token, credential.device_credential].filter((s): s is string => Boolean(s))
-      const redact = (text: string) => secrets.reduce((safe, secret) => safe.split(secret).join("[redacted]"), text)
-      const code = typeof error?.code === "string" && /^[a-z][a-z0-9_/-]{0,95}$/u.test(error.code) && redact(error.code) === error.code
-        ? error.code : "loop-host/backend-invalid"
-      let message = typeof error?.message === "string" ? error.message : "Loop rejected the request"
-      if (code === "validation" && Array.isArray(error.details?.violations)) {
-        for (const violation of error.details.violations.slice(0, 3)) {
-          if (typeof violation?.message === "string") {
-            const path = typeof violation.path === "string" && violation.path ? violation.path + " " : ""
-            message += " " + path + violation.message
-          }
-        }
-      }
-      throw new LoopError(code, redact(message).slice(0, 512), response.status)
+      const error = serverError(result, response.status, "loop-host/backend-invalid",
+        [credential.access_token, credential.refresh_token, credential.device_credential].filter((value): value is string => Boolean(value)))
+      // Existing callers classify the public action code; keep it stable.
+      throw Object.assign(new LoopError(error.serverCode ?? error.code, error.message, error.status, error.outcomeUnknown),
+        {serverCode:error.serverCode, hint:error.hint, details:error.details})
     }
     return result
   }

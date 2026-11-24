@@ -67,7 +67,8 @@
     "private-path.ps1",
     "managed-native-actions.mjs",
     "backend/dist",
-    "managed-config.mjs"
+    "managed-config.mjs",
+    "tool-errors.mjs"
   ],
   "license": "Apache-2.0",
   "engines": {

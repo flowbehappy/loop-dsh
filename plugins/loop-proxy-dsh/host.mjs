@@ -1,4 +1,5 @@
 // Loaded inside the trusted DSH tools runtime, before the command reaches a shell.
+import {toolErrorText} from "./tool-errors.mjs"
 import {readHarnessGuide} from "./managed-skill.mjs"
 
 export const name = "loop-proxy-dsh"
@@ -92,6 +93,10 @@ export function createLoopProxyBridge(ctx, options = {}) {
       }
     }
     const loopHost = typeof ctx.get === "function" ? ctx.get("loopHostService") : undefined
+    if (parsed.verb === "actions") {
+      // Discovery can expose Host tools without loading procedural instructions.
+      loopHost?.collaboration?.enableTools(sessionID, "actions")
+    }
     if (parsed.principal === "human") {
       try {
         const result = await loopHost?.humanCommand?.(sessionID, parsed, exec.signal)
@@ -152,11 +157,7 @@ function shellResult(session, result, exec) {
   }
 }
 
-function errorMessage(error) {
-  return (error instanceof Error ? error.message : String(error))
-    .replace(/\s+/g, " ")
-    .slice(0, 512)
-}
+const errorMessage = toolErrorText
 
 // The bare package row declares the client module. The native managed entry
 // installs the tool middleware after its credential-backed Host service exists.

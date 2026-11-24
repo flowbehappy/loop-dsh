@@ -1,3 +1,4 @@
+import {toolErrorText} from "./tool-errors.mjs"
 import {createHash} from "node:crypto"
 import {dispatchTaskSchema} from "./collaboration-task-schema.mjs"
 import {CollaborationUIJournal} from "./host-collaboration-ui-journal.mjs"
@@ -103,7 +104,7 @@ function messageText(message) {
 // Only an authoritative, complete channel roster can establish absence. The
 // directory's capability flags also apply to unbound and personal Sessions.
 export async function missingChannelAgents(channelId, targets, readPage, checkCurrent) {
-  const missing = new Set(targets.filter(target => target.targetType === "agent").map(target => target.memberId))
+  const missing = new Set(targets.filter(target => ["agent", "human"].includes(target.targetType)).map(target => target.memberId))
   const cursors = new Set()
   let cursor
   while (missing.size) {
@@ -883,7 +884,7 @@ export class LoopCollaborationRuntime {
       const missing = await missingChannelAgents(context.defaultChannelId, targets, readMembers, assertCurrent)
       if (missing.length) {
         return {state: "not-in-channel", channelId: context.defaultChannelId, missing,
-          nextStep: "These Agents can be mentioned but cannot receive a Task in this channel yet. Explain who is missing. If inviting them would serve the request, ask the user before sharing the channel unless already authorized. After the exact invitation, retry preparation to verify membership."}
+          nextStep: "These members are visible in the directory but are absent from this channel. Explain who is missing. If inviting them would serve the request, ask the user before sharing the channel unless already authorized. After the exact invitation, retry preparation to verify membership."}
       }
       step = "checking the collaboration binding"
       let status = await this.call("collaborationStatus", {sessionId}, signal)
@@ -935,7 +936,7 @@ export class LoopCollaborationRuntime {
       }
       return {state: "ready", targets, channelId: context.defaultChannelId,
         projectId: text(context.projectId, 200), shareScope: "task-description",
-        nextStep: "The selected Agents were found in the saved channel. Verify any required sharing authorization, then dispatch the requested Task. Loop will check task access at dispatch. No Task or invitation has been sent."}
+        nextStep: "The selected members were found in the saved channel. Verify any required sharing authorization, then dispatch the requested Task. Loop will check task access at dispatch. No Task or invitation has been sent."}
     }).catch(error => {
       if (error?.code === "loop-host/waiting-for-access" || error?.status === 403) {
         throw failure(error.code ?? "loop-host/waiting-for-access", `Loop denied access while ${step}. No task was dispatched. ${error.message}`)
@@ -1508,26 +1509,6 @@ export class LoopCollaborationRuntime {
     return session && this.ctx.sessionProjections.stateOf(session, "loopCollaborationReceipts")?.feedback === true
   }
 
-  checkNamedTaskRetry(turn, tasks) {
-    if (Array.isArray(tasks) && tasks.some(task => typeof task?.title === "string" && turn?.namedTaskTitles?.has(task.title.trim()))) {
-      throw failure("loop-collaboration/conflict", "This named-channel task has already been attempted in this turn. Inspect the original board and receipt before another write.")
-    }
-  }
-
-  checkDispatchRetry(sessionId, command, recordNamed = false) {
-    const turn = this.currentUserInputs.get(sessionId)
-    if (!turn) return
-    const {tasks,channelName} = JSON.parse(command.input)
-    this.checkNamedTaskRetry(turn,tasks)
-    const attempted = turn.dispatchTitles
-    if (Array.isArray(tasks) && tasks.some(task => typeof task?.title === "string" && attempted?.has(task.title.trim()))) {
-      throw failure("loop-collaboration/conflict", "This task already has a collaboration dispatch in this turn. Inspect its receipt or retry the original dispatch with the requested assignee. A different destination needs a new user instruction.")
-    }
-    if (recordNamed && typeof channelName === "string" && tasks?.length === 1 && typeof tasks[0]?.title === "string") {
-      (turn.namedTaskTitles ??= new Set()).add(tasks[0].title.trim())
-    }
-  }
-
   async authorizeAgentCall(sessionId, command, schema, signal) {
     if (this.currentUserInputs.has(sessionId) || schema?.readOnly === true) return
     const args = JSON.parse(command.input)
@@ -2068,6 +2049,10 @@ export class LoopCollaborationRuntime {
       }
       return this.ctx.tools.register(defineTool({
         ...definition,
+        async execute(...args) {
+          try { return await definition.execute(...args) }
+          catch (error) { throw Object.assign(new Error(toolErrorText(error)), {code:error?.code}) }
+        },
         output: {schema: outputSchema(), render: renderReceipt},
       }), {when})
     }
@@ -2192,9 +2177,6 @@ export class LoopCollaborationRuntime {
       parameters: dispatchToolParameters(),
       async execute(args, exec) {
         const task = validateDispatchTasks(args)
-        const turn = runtime.currentUserInputs.get(sessionId(exec))
-        runtime.checkNamedTaskRetry(turn,[task])
-        if (turn) (turn.dispatchTitles ??= new Set()).add(task.title.trim())
         const directory = await runtime.directory({sessionId: sessionId(exec), query: task.assignee, limit: MAX_DIRECTORY_LIMIT}, exec.signal)
         const entries = (directory?.entries ?? []).filter(entry => entry?.memberId === task.assignee)
         if (entries.length !== 1 || !["human", "agent"].includes(entries[0].targetType) ||

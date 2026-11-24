@@ -13,7 +13,7 @@ export async function liveTopicProvider() {
   const model = process.env.LOOP_TEST_MODEL_NAME || 'deepseek-v4-flash'
   let workerModelTurns = 0
   const request = async (body) => {
-    const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+    const response = await fetch((process.env.LOOP_TEST_MODEL_BASE_URL || 'https://api.deepseek.com/v1').replace(/\/$/u,'')+'/chat/completions', {
       method: 'POST',
       redirect: 'error',
       signal: AbortSignal.timeout(90000),

@@ -1,6 +1,6 @@
 import {parseWire, stringifyWire} from "./codec.ts"
 import {TokenManager, boundedJSON} from "./http.ts"
-import {LoopError, requireActive} from "./errors.ts"
+import {LoopError, requireActive, serverError} from "./errors.ts"
 import type {Credential} from "./credentials.ts"
 
 export type HostArea = "models" | "account" | "sync" | "workspace"
@@ -50,16 +50,11 @@ export class HostAPI {
         continue
       }
       if (!response.ok) {
-        await response.body?.cancel()
         const code = ({400:"invalid-request",422:"invalid-request",401:"needs-auth",403:"waiting-for-access",404:"target-unavailable",409:"conflict",429:"rate-limited"} as Record<number,string>)[response.status] ?? "backend-unavailable"
-        // Some tool surfaces retain only the message. Use the bounded local
-        // classification, never a server body, credential, URL or target ID.
-        let hint = ""
-        if (path === "/collaboration/actions/dispatch") {
-          if (code === "invalid-request") hint = ". Verify the requested board and assignee membership. Keep the assignee and destination when correcting this request."
-          if (code === "waiting-for-access") hint = ". Loop denied the dispatch and returned no acceptance receipt. Check the bound channel and the coordinator and assignee memberships. Reconcile any earlier uncertain attempt through its original operation."
-        }
-        throw new LoopError("loop-host/" + code, `Loop Host request was rejected (HTTP ${response.status}; ${code})`+hint, response.status)
+        let body
+        try { body = await boundedJSON(response, 64 << 10) } catch { /* Keep status when the body is invalid. */ }
+        throw serverError(body, response.status, "loop-host/" + code,
+          [credential.access_token, credential.refresh_token, credential.device_credential].filter((value): value is string => Boolean(value)))
       }
       if (response.status === 204) { await response.body?.cancel(); return undefined }
       try { return await boundedJSON(response,area === "sync" ? 4 << 20 : 2 << 20,options.lossless ? parseWire : JSON.parse) }

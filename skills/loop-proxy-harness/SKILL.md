@@ -18,12 +18,26 @@ use a shared topic.
 
 An @ reference identifies the selected Loop colleague or Agent. For a question
 about channel access, read the current channel roster. For a requested
-assignment, preparation checks Agent membership and reports any missing Agents.
+assignment, preparation checks Human and Agent membership and reports missing members.
 An invitation shares the channel and requires the user's authorization.
 
 When the user names a channel, use its exact display name or #slug. Use
 `loop_channel_join` to join as the assistant and `loop_channel_task` to assign
 a task there. A Human invitation link can accompany the channel name.
+
+## Plugin contract
+
+Discover capabilities with `loop-proxy actions`, inspect their current schema,
+and call them with explicit arguments. Discovery also exposes Host collaboration
+tools; guides provide reference material, not permission to act. Choose the
+operations and their order to satisfy the request. Loop enforces resource access.
+A rejected operation does not disable other authorized operations.
+
+For a call that needs Human authorization, the Host presents the exact scope and
+returns after the decision. A schema describing authorization is not a pending
+approval. Errors retain protocol codes and outcome uncertainty; inspect receipts
+before repeating an uncertain write. Reuse the API's retry identity for the same
+operation. A receipt reports an operation's result, not completion of the user's goal.
 
 ## Business actions
 

@@ -5,6 +5,9 @@ import {randomUUID} from 'node:crypto'
 // Assertions against the Human API below the model verify the effects independently.
 export async function prepareBusinessJourney(api, workspace, service, sessionId, signal) {
   const {assistant} = await api('PUT','/api/v1/me/personal-assistants/'+workspace)
+  // Make the consent scenario independent of evolving default permissions.
+  const {resource: _resource, ...permissions} = assistant.permissions
+  await api('PUT','/api/v1/me/personal-assistants/'+workspace+'/permissions',{revision:assistant.revision,permissions})
   const seed = await api('POST','/internal/e2e/agents/'+assistant.agentId+'/knowledge-base')
   const root = '/api/v1/workspaces/'+workspace
   const {project} = await api('POST',root+'/projects?envelope=container',{name:'DSH project journey',prefix:'DSHJ'})

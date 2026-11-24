@@ -64,7 +64,7 @@ create work, notify anyone, or prove channel membership.
    this turn already has an active collaboration intent.
    This binds the current user message through the Host; no manual @ is needed.
    Directory visibility or a cancelled question alone is not a task request.
-   Preparation checks Agent membership in the exact saved channel. A
+   Preparation checks Human and Agent membership in the exact saved channel. A
    `not-in-channel` result identifies missing Agents and creates no intent.
    Explain the result and decide with the user whether to invite them.
    If the roster cannot be read, report that membership could not be verified.

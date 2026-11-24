@@ -103,6 +103,26 @@ server, the official DSH runtime and persisted session output. Protocol tests
 and macOS headless tests do not establish Windows/Linux or Desktop GUI
 acceptance.
 
+The regression catalog is `docs/testing/super-agent-scenarios.json`. Run the
+ordinary package tests first, then `native-real-loop.test.mjs` and the installed
+`native-dsh-runtime.test.mjs` against an explicitly isolated Test Hub. Enable
+`LOOP_TS_E2E_BUSINESS=1` and `LOOP_TS_E2E_CHANNEL=1` for deterministic protocol
+journeys. For actual model-driven business cases use
+`LOOP_TS_E2E_LIVE_BUSINESS=1`, `AUDIT_GROUP=<catalog group>`, a dedicated
+`LOOP_TEST_MODEL_FILE`, and `LOOP_TEST_EVIDENCE_DIR`. The optional
+`LOOP_TEST_MODEL_BASE_URL` and `LOOP_TEST_MODEL_NAME` select that test provider.
+Each case records its first result and checks canonical Loop state; any failed
+case fails the group. `LOOP_TS_E2E_LIVE_TOPIC=1` covers two real worker agents,
+separate topics, task feedback and a second workspace. Follow these with actual
+Web and Desktop acceptance from the catalog, recording results independently.
+
+Generic calls preserve the Agent's explicit arguments and expose current API
+schemas, scoped consent, structured errors and receipts. They do not infer
+business intent from prose, block unrelated calls after rejection, or treat a
+task title as an operation identity. Existing named tools remain compatible;
+Loop remains the authority for permissions, resource membership and retry
+identities.
+
 ## License
 
 Released under the [Apache License 2.0](https://github.com/flowbehappy/loop-dsh/blob/main/LICENSE). See the `LICENSE` file shipped in this package. Third-party dependencies keep their own licenses.
