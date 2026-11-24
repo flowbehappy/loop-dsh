@@ -190,8 +190,8 @@ export class LoopBackend {
   namedChannelTask(context: ActionContext, args: Record<string,unknown>, prepare: boolean, signal?: AbortSignal) {
     return this.action(context,signal,(client,combined)=>createNamedChannelTask(client,args,prepare,combined),true)
   }
-  channelHistory(context: ActionContext, args: Record<string,unknown>, prepare: boolean, signal?: AbortSignal, priorDenial?: LoopError) {
-    return this.action(context, signal, (client, combined) => readNamedChannel(client,args,prepare,combined,priorDenial))
+  channelHistory(context: ActionContext, args: Record<string,unknown>, prepare: boolean, signal?: AbortSignal) {
+    return this.action(context, signal, (client, combined) => readNamedChannel(client,args,prepare,combined))
   }
   humanDM(context: ActionContext, name: string, args: Record<string,unknown>, signal?: AbortSignal) {
     return this.action(context,signal,(client,combined)=>requestHumanDM(client,name,args,combined))

@@ -1351,3 +1351,69 @@ test('explicit personal call previews exact arguments through the public endpoin
   await assert.rejects(LoopHostRuntime.prototype.previewHumanCommand.call(host,'session',{...command,connection:'apps'}),/connection explicitly/)
   assert.equal(received.length,1)
 })
+
+test('localized not-found errors preserve the selected identity instead of guessing Human access',async t=>{
+  const {NativeHostActions}=await import('../backend/adapter.ts')
+  let message='DM does not exist',calls=0
+  const f=await fixture(t,(req,res)=>{
+    calls++;assert.ok(req.url.endsWith('/actions/message.history/invocations'))
+    res.writeHead(404).end(JSON.stringify({error:{code:'not_found',message}}))
+  })
+  await f.credentials.publish({...f.value,scope:'offline_access'})
+  const adapter=new NativeHostActions({stateHome:f.root+'/host',serviceBaseUrl:f.base,loopWorkspaceId:'workspace',installationId:'installation',pageOrigin:f.base,syncProfile:'test',accountPrincipal:'principal'},{provider:f.provider})
+  t.after(()=>adapter.dispose())
+  const args={target:'dm:@abcdefghijkl'}
+  for(message of ['DM does not exist','会话不存在','Conversation introuvable']) {
+    await assert.rejects(adapter.request('agentAction',{workspaceId:'local',sessionId:'session',name:'message.history',arguments:args,delegationArguments:args,prepareDelegation:true}),{code:'not_found',status:404,message})
+  }
+  assert.equal(calls,3)
+})
+
+test('denied actions share one delegation contract, including resolved channel history',async t=>{
+  const {NativeHostActions}=await import('../backend/adapter.ts')
+  const previewInputs=[]
+  const f=await fixture(t,async(req,res)=>{
+    let raw='';for await(const b of req)raw+=b
+    const input=raw?JSON.parse(raw):{}
+    if(req.url.endsWith('/actions/workspace.list/invocations')){
+      assert.equal(input.channelName,'#engineering');res.end(JSON.stringify({data:{data:{channels:[{channelId:'chn_abc',name:'engineering'}]}}}));return
+    }
+    const match=req.url.match(/\/actions\/([^/]+)\/(invocations|delegation-preview)$/)
+    assert.ok(match)
+    const [,name,operation]=match
+    if(operation==='invocations'){res.writeHead(403).end(JSON.stringify({error:{code:'resource_not_granted',message:'Denied'}}));return}
+    previewInputs.push([name,input]);res.end(JSON.stringify({action:name,write:false,manage:false,workspaceWide:false,resourceConstraints:['channel:chn_abc']}))
+  })
+  await f.credentials.publish({...f.value,scope:'offline_access'})
+  const adapter=new NativeHostActions({stateHome:f.root+'/host',serviceBaseUrl:f.base,loopWorkspaceId:'workspace',installationId:'installation',pageOrigin:f.base,syncProfile:'test',accountPrincipal:'principal'},{provider:f.provider})
+  t.after(()=>adapter.dispose())
+  for(const name of ['message.history','future.inspect']){
+    const args={target:name==='message.history'?'#engineering':'channel:chn_abc',limit:7}
+    const result=await adapter.request('agentAction',{workspaceId:'local',sessionId:'session',name,arguments:args,delegationArguments:args,prepareDelegation:true})
+    assert.equal(result.delegation.action,name)
+  }
+  assert.deepEqual(previewInputs,[['message.history',{target:'channel:chn_abc',limit:7}],['future.inspect',{target:'channel:chn_abc',limit:7}]])
+})
+
+test('personal discovery uses the public paginated catalog before consent and keeps connections distinct',async t=>{
+  const {NativeHostActions}=await import('../backend/adapter.ts')
+  const {LoopHostRuntime}=await import('../host-runtime.mjs')
+  const calls=[]
+  const f=await fixture(t,(req,res)=>{
+    const url=new URL(req.url,'http://localhost');calls.push(url.searchParams.get('domain'))
+    assert.equal(req.method,'GET');assert.ok(url.pathname.endsWith('/external/agent/actions/delegation-catalog'))
+    const domain=url.searchParams.get('domain'),cursor=url.searchParams.get('cursor')
+    res.end(JSON.stringify({actions:[{id:domain+(cursor?'.read':'.write')}],hasMore:!cursor,...(!cursor?{nextCursor:'page2'}:{})}))
+  })
+  await f.credentials.publish({...f.value,scope:'offline_access'})
+  const adapter=new NativeHostActions({stateHome:f.root+'/host',serviceBaseUrl:f.base,loopWorkspaceId:'workspace',installationId:'installation',pageOrigin:f.base,syncProfile:'test',accountPrincipal:'principal'},{provider:f.provider})
+  t.after(()=>adapter.dispose())
+  const host={withConnectionLease:(_s,fn)=>fn(),businessWorkspace:async()=>({workspace:{id:'local'}}),accountPrincipal:'principal',actions:{agentCatalog:(input,signal)=>adapter.request('agentCatalog',input,signal)}}
+  const command={principal:'human',connection:'business',verb:'actions',name:'future.'}
+  const read=c=>LoopHostRuntime.prototype.previewHumanCommand.call(host,'session',c)
+  assert.deepEqual(JSON.parse((await read(command)).output).actions,['future.read','future.write'])
+  assert.deepEqual(JSON.parse((await read({...command,connection:'apps',name:undefined})).output).actions,['app.read','app.write'])
+  await assert.rejects(read({...command,connection:'apps'}),/explicitly/)
+  await assert.rejects(read({...command,name:undefined}),/published action domain/)
+  assert.deepEqual(calls,['future','future','app','app'])
+})

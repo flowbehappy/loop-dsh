@@ -461,6 +461,7 @@ export default class LoopHostService extends TypertRemoteService {
 
   async humanCommand(sessionId, command, signal, description) {
     if (command.verb === "authorize") return this.humanTasks.authorize(sessionId, command, signal)
+    if (command.verb === "actions") return this.runtime.previewHumanCommand(sessionId, command, signal)
     const task = this.humanTasks.forCommand(sessionId, command, true)
     if (task) return this.runtime.humanCommand(sessionId, command, signal, () => this.humanTasks.current(sessionId) === task.message, task.grant)
     if (!["schema","call"].includes(command.verb)) return this.humanTasks.forCommand(sessionId, command)
@@ -488,22 +489,9 @@ export default class LoopHostService extends TypertRemoteService {
     if (!result.delegation) return result
     if (this.humanTasks.current(sessionId) !== message) throw new Error("The originating user request changed.")
     const input = result.delegationArguments ? JSON.stringify(result.delegationArguments) : command.input
-    const summary = result.channelLabel && command.name === "task.create"
-      ? "Create task in "+result.channelLabel+": "+result.delegationArguments.tasks[0].title
-      : result.channelLabel ? "Read channel history: "+result.channelLabel : description
-    const grant = await this.humanTasks.offer(sessionId, message, result.owner, result.delegation, summary, signal, input, result.agentDenied)
-    const response = await this.runtime.humanCommand(sessionId, {...command,input,principal:"human",connection:grant.policy.connection}, signal,
+    const grant = await this.humanTasks.offer(sessionId, message, result.owner, result.delegation, description, signal, input, result.agentDenied)
+    return this.runtime.humanCommand(sessionId, {...command,input,principal:"human",connection:grant.policy.connection}, signal,
       () => this.humanTasks.current(sessionId) === message, grant)
-    if (!response.failed && command.name === "task.create" && result.channelLabel) {
-      const data = JSON.parse(response.output)?.data?.data
-      const task = data?.tasks?.[0]
-      const expected = result.delegationArguments
-      if (data?.tasks?.length !== 1 || !task?.taskId || ![expected.board.scopeId,result.channelLabel].includes(task.channelRef ?? data.channelRef) ||
-          task.assigneeProfile?.memberId !== expected.tasks[0].assignee) {
-        throw new Error("Inspect the create receipt for "+(task?.taskId ?? "the requested task")+" in "+result.channelLabel+" before retrying.")
-      }
-    }
-    return response
   }
 
   async findHumans(sessionId,query,signal) {

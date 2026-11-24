@@ -29,7 +29,11 @@
         "Missing Human: bound-board preflight, scoped consent on a shareable business board, one assigned task, recipient readback and unchanged private telemetry",
         "explicit Human schema discovery before consent",
         "generic Human call derives authorization from arguments without trying an Agent write",
-        "manual authorization compatibility and stale-request rejection"
+        "manual authorization compatibility and stale-request rejection",
+        "authorization admission depends on local user provenance, not natural-language keywords or content modality",
+        "localized not-found errors do not switch identity or trigger personal access",
+        "unresolved names stay unresolved until the Agent explicitly discovers or selects a target",
+        "generic denied calls share the same delegation path across action families"
       ],
       "note": "Model chooses the sequence. Deterministic DSH fixture verifies API mechanics, not model autonomy."
     },

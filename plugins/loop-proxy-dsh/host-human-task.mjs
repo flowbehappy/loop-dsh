@@ -9,20 +9,6 @@ function refusal(message) {
   return Object.assign(new Error(message), {code:"loop-host/waiting-for-access"})
 }
 
-export function userText(message) {
-  if (message?.source?.kind !== "user" || !message.source.rpcId) return ""
-  return message.content?.filter(block => block.type === "text").map(block => block.text).join("\n").trim() ?? ""
-}
-
-const explicit = /(?:代表我本人|on my behalf)|(?:以|使用|用)(?:我(?:本人)?的?|本人的?)(?:名义|名義|身份|身分|账号|帳號|账户|帳戶)|(?:in my (?:own )?name|(?:use|using) my (?:own )?(?:identity|account|name)|act as me)\b|(?:私|わたし)の(?:名前|名義|アカウント)で/iu
-const assistantOnly = /(?:仅|僅|只)(?:限|用|使用)?(?:助手|智能体|智能體)(?:自己)?(?:的)?(?:权限|權限)|(?:do not|don't|never) (?:ask|request) (?:for )?(?:permission|authorization)|only use (?:the )?(?:assistant|agent)(?:['’]s)? (?:permissions|access)/iu
-const noPersonalAccess = /(?:不要|别|別|禁止|不能|不准|无需|無需|不得|请勿|請勿).{0,12}(?:代表我本人|(?:以|用)(?:我(?:本人)?的?|本人(?:的)?)(?:名义|名義|身份|身分|账号|帳號|账户|帳戶)|(?:请求|請求|申请|申請)(?:我的|个人|個人)?(?:授权|授權))|(?:do not|don't|never|without|not to)\b[^.!?。！？]{0,60}(?:my (?:own )?(?:name|account|identity)|as me|on my behalf)/iu
-
-export function requestsHumanIdentity(message) {
-  const text = userText(message)
-  return !noPersonalAccess.test(text) && !assistantOnly.test(text) && (explicit.test(text) || /^\s*\/as-me(?:\s|$)/u.test(text))
-}
-
 function taskPolicy(command, readOnly) {
   const input = JSON.parse(command.input)
   if (typeof input.summary !== "string" || !input.summary.trim() || input.summary.length > 400 ||
@@ -85,8 +71,10 @@ export class HumanTaskConsent {
   }
 
   canOffer(message) {
-    const text = userText(message)
-    return Boolean(text) && !assistantOnly.test(text) && !noPersonalAccess.test(text)
+    // User wording is the Agent's input, not an authorization protocol. Only
+    // authenticated local user turns may open a card; the actual decision is
+    // made in that card / Loop, with the exact action and resource scope.
+    return message?.source?.kind === "user" && Boolean(message.source.rpcId)
   }
 
   async offer(sessionId, message, owner, preview, description, signal, input = "", agentDenied = true) {
@@ -120,16 +108,11 @@ export class HumanTaskConsent {
 
   async authorize(sessionId,command,signal) {
     const message = this.current(sessionId)
-    if (!this.canOffer(message) || !requestsHumanIdentity(message)) {
-      throw refusal("Personal mode requires a direct instruction. For ordinary requests use the Agent action first. The Host will offer personal authorization if appropriate.")
+    if (!this.canOffer(message)) {
+      throw refusal("Human authorization requires a current local user request.")
     }
     const owner = await this.owner(sessionId,signal,command.name)
     const policy = taskPolicy(command,owner.readOnly)
-    const requestedPeer = userText(message).match(/dm:@[a-z0-9]{12}(?![a-z0-9])/gu)
-    if (requestedPeer?.length === 1 && ["message.send","message.history"].includes(command.name) &&
-        !policy.policy.resourceConstraints.includes(requestedPeer[0])) {
-      throw refusal("Use the exact DM resource specified by the user: "+requestedPeer[0]+". No authorization has been requested.")
-    }
     const grant = await this.confirm(sessionId,message,policy,signal,owner)
     this.approved.set(message,grant)
     return {failed:false,output:JSON.stringify({authorized:true,connection:grant.policy.connection,action:command.name,resources:grant.policy.resourceConstraints})}

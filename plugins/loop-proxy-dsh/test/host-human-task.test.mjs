@@ -41,16 +41,12 @@ test("only the original local instruction can confirm and consume a task grant",
   await assert.rejects(revoked,/revoked/)
 })
 
-test("ordinary and remote inputs cannot start a personal task, and empty resource scope must be declared",async t=>{
-  let message=input("Please read the project")
+test("remote inputs cannot start personal authorization, and empty resource scope must be declared",async t=>{
+  let message={...input("Please read the project"),source:{kind:"delivery"}}
   const tasks = new HumanTaskConsent({owner:async()=>({serviceBaseUrl:"https://loop.example"}),current:()=>message,request:()=>assert.fail("unexpected request")})
   t.after(()=>tasks.dispose())
   const signal=new AbortController().signal
-  await assert.rejects(tasks.authorize("chat",command,signal),/direct instruction/)
-  message=input("不要以我的名义查看这个项目")
-  await assert.rejects(tasks.authorize("chat",command,signal),/direct instruction/)
-  message={...input("以我的名义查看项目"),source:{kind:"delivery"}}
-  await assert.rejects(tasks.authorize("chat",command,signal),/direct instruction/)
+  await assert.rejects(tasks.authorize("chat",command,signal),/current local user request/)
   message=input("以我的名义查看项目")
   await assert.rejects(tasks.authorize("chat",{...command,input:'{"summary":"项目"}'},signal),/exact resource/)
 
@@ -64,8 +60,8 @@ test("a current user task can review a real denial once without an identity keyw
   const abort=new AbortController()
   t.after(()=>{abort.abort();tasks.dispose()})
   assert.equal(tasks.canOffer(message),true)
-  assert.equal(tasks.canOffer(input("不要以我的名义办这件事")),false)
-  assert.equal(tasks.canOffer(input("只用助手自己的权限")),false)
+  assert.equal(tasks.canOffer(input("不要以我的名义办这件事")),true)
+  assert.equal(tasks.canOffer(input("只用助手自己的权限")),true)
   assert.equal(tasks.canOffer({...message,source:{kind:"delivery"}}),false)
   const stream=tasks.events("chat",abort.signal)
   await stream.next()
@@ -85,10 +81,25 @@ test("retired resource pick commands cannot open a prompt",()=>{
   for (const family of ["project","kb"]) assert.equal(parseCommand("loop-proxy pick "+family),null)
 })
 
-test("a request to act for the user preserves positive and negative identity intent",async()=>{
-  const {requestsHumanIdentity}=await import('../host-human-task.mjs')
-  for (const text of ['请明确代表我本人发送','Please send on my behalf']) assert.equal(requestsHumanIdentity(input(text)),true)
-  for (const text of ['不要代表我本人回复',"Do not send on my behalf"]) assert.equal(requestsHumanIdentity(input(text)),false)
+test("local provenance allows consent without interpreting the user's language or content",async t=>{
+  let message
+  const tasks=new HumanTaskConsent({current:()=>message,owner:async()=>({serviceBaseUrl:"https://loop.example"}),request:async()=>status})
+  const abort=new AbortController()
+  t.after(()=>{abort.abort();tasks.dispose()})
+  for (const content of [[{type:"text",text:"Veuillez consulter ce projet"}],[{type:"text",text:"Do not send on my behalf"}],[{type:"image",url:"attachment"}]]) {
+    message={source:{kind:"user",rpcId:"rpc-local"},content}
+    const events=tasks.events("chat",abort.signal);await events.next()
+    const running=tasks.authorize("chat",command,abort.signal)
+    const view=(await events.next()).value
+    assert.equal(view.state,"reuse");assert.equal(view.action,"project.get")
+    assert.deepEqual(view.resources,grant.resourceConstraints)
+    assert.throws(()=>tasks.forCommand("chat",command))
+    tasks.decide({sessionId:"chat",requestId:view.requestId,decision:"cancel"})
+    await assert.rejects(running,/declined/)
+    assert.throws(()=>tasks.forCommand("chat",command))
+    await events.return()
+  }
+  for(const source of [{kind:"user"},{kind:"delivery",rpcId:"remote"},{kind:"system",rpcId:"system"}])assert.equal(tasks.canOffer({source}),false)
 })
 
 test("an unpublished action cannot open a personal consent card",async t=>{
@@ -110,8 +121,6 @@ test("manual authorization derives omitted write scope from the published action
   t.after(()=>tasks.dispose())
   tasks.confirm=async(_session,_message,{policy})=>({policy})
   const send={...command,name:"message.send",input:JSON.stringify({summary:"Send the approved DM",resourceConstraints:["dm:@abcdefghijkl"]})}
-  const wrongPeer={...send,input:send.input.replace("dm:@abcdefghijkl","dm:abcdefghijkl")}
-  await assert.rejects(tasks.authorize("chat",wrongPeer,signal),/exact DM resource/)
   await tasks.authorize("chat",send,signal)
   assert.equal(tasks.approved.get(message).policy.write,true)
   const readOnly={...send,input:JSON.stringify({...JSON.parse(send.input),write:false})}

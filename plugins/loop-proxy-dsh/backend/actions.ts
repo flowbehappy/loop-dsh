@@ -171,28 +171,11 @@ export async function createNamedChannelTask(client: ActionClient, args: Record<
   return {...result, resolvedChannelId:channel.channelId}
 }
 
-export async function readNamedChannel(client: ActionClient, args: Record<string,unknown>, prepare: boolean, signal?: AbortSignal, priorDenial?: LoopError) {
+export async function readNamedChannel(client: ActionClient, args: Record<string,unknown>, prepare: boolean, signal?: AbortSignal) {
   const {channelName,readAs="agent",...history} = args
   if (Object.hasOwn(history,"target") || !["agent","human"].includes(String(readAs))) throw new LoopError("validation","Invalid channel history request.",400)
-  let channel
-  try {
-    channel = await resolveChannel(client,channelName,signal)
-  } catch (error) {
-    if (!(error instanceof LoopError) || error.code !== "channel_not_found" || typeof channelName !== "string" || channelName.trim().startsWith("#")) throw error
-    // Search the same visible directory for a correction. Directory matches do
-    // not authorize reading content, and a match in a description is not a name.
-    const query = channelName.trim()
-    const found = await client.invoke("workspace.list",{kind:"channels",query,limit:10},signal)
-    const page = found?.data?.data
-    if (!Array.isArray(page?.channels) || page.hasMore || page.channels.length !== 1) throw error
-    const [entry] = page.channels
-    if (typeof entry?.name !== "string" || !/^[a-z0-9][a-z0-9-]*$/u.test(entry.name) ||
-        typeof entry.displayName !== "string" || !entry.displayName.toLowerCase().includes(query.toLowerCase())) throw error
-    const exact = await resolveChannel(client,"#"+entry.name,signal)
-    if (exact.displayName !== entry.displayName) throw error
-    const candidate = {channelId:exact.channelId,displayName:exact.displayName,slug:"#"+exact.name}
-    return {error:{code:"channel_name_incomplete",message:"The exact name did not match. The directory found one related channel. If it identifies the requested conversation, retry the read using its exact slug. Otherwise clarify the name.",candidate}}
-  }
+  const channel = await resolveChannel(client,channelName,signal)
+  let priorDenial: LoopError | undefined
   const target = "#"+channel.name
   let direct
   if (readAs !== "human" && !priorDenial) {

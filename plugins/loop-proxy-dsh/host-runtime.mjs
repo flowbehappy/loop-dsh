@@ -1605,8 +1605,18 @@ export class LoopHostRuntime {
   async previewHumanCommand(sessionId, command, signal) {
     return this.withConnectionLease(signal, async () => {
       const {workspace} = await this.businessWorkspace(sessionId)
-      if (command.principal !== "human" || command.connection !== (command.name.startsWith("app.") ? "apps" : "business")) {
+      const name = command.name || (command.verb === "actions" && command.connection === "apps" ? "app." : "")
+      if (command.principal !== "human" || command.connection !== (name.startsWith("app.") ? "apps" : "business")) {
         throw failure("loop-host/invalid-request", "Select the action's Human business or Apps connection explicitly")
+      }
+      if (command.verb === "actions") {
+        const result = await this.actions.agentCatalog({workspaceId:workspace.id, sessionId, accountPrincipal:this.accountPrincipal,
+          prefix:name, personalCatalog:true},signal)
+        if (!Array.isArray(result?.actions) || result.actions.some(id=>typeof id !== "string")) {
+          throw failure("loop-host/backend-invalid", "Loop personal authorization catalog is invalid")
+        }
+        return {failed:false,output:boundedJSON({principal:"human",connection:command.connection,actions:result.actions,
+          authorization:"required for execution"})}
       }
       const result = await this.actions.agentSchema({workspaceId:workspace.id, sessionId, accountPrincipal:this.accountPrincipal,
         name:command.name, personalSchema:true,
@@ -1866,8 +1876,6 @@ export class LoopHostRuntime {
       return {
         failed: Boolean(result.error),
         ...(result.error ? {errorCode:result.error.code} : {}),
-        ...(command.name === "message.history" && result.error?.code === "channel_name_incomplete"
-          ? {channelCandidate:result.error.candidate} : {}),
         output: boundedJSON(command.name === "message.history" ? historyResult(result, "agent")
           : webUrl ? {...result, webUrl} : result),
       }

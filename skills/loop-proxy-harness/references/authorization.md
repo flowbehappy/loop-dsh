@@ -2,10 +2,14 @@
 
 Use `loop-proxy schema` and `loop-proxy call` for work as the connected Agent.
 When the user requests personal authorship, select it explicitly with
-`loop-proxy human schema <action>` and `loop-proxy human call <action> <JSON>`
-(`human-apps` for Apps). Schema inspection needs no prior consent. Loop computes
+`loop-proxy human actions <domain.>`, `loop-proxy human schema <action>` and
+`loop-proxy human call <action> <JSON>` (`human-apps` for Apps). Discovery and
+schema inspection need no prior consent. Use published action names, not guessed
+synonyms. An unknown action does not mean the connection lacks the capability. Loop computes
 exact authorization from the call arguments; the Host presents the confirmation
-in this conversation and executes that same call after approval. Keep target IDs
+in this conversation and executes that same call after approval. Choose identity
+from the user’s request; honor any instruction not to seek personal access.
+The plugin does not infer identity or consent from natural-language keywords. Keep target IDs
 and give the tool a brief description of the operation and objects in the user's
 language. A normal Agent call also offers this flow on a definite permission denial.
 

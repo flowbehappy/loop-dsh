@@ -131,3 +131,9 @@ test('manual Human authorization retains its existing grant and execution route'
   host.runtime.humanCommand=async(_id,c,_signal,current,g)=>{assert.equal(c,command);assert.equal(current(),true);assert.equal(g,grant);return {output:'manual receipt'}}
   assert.equal((await Host.prototype.humanCommand.call(host,sessionId,command)).output,'manual receipt')
 })
+
+test('Human discovery needs no manual grant and never opens a consent card',async()=>{
+  const command={principal:'human',connection:'business',verb:'actions',name:'future.'}
+  const host={humanTasks:{forCommand:()=>assert.fail('discovery does not consume a grant'),offer:()=>assert.fail('discovery does not request consent')},runtime:{previewHumanCommand:async(_id,c)=>{assert.equal(c,command);return {failed:false,output:'catalog'}}}}
+  assert.equal((await Host.prototype.humanCommand.call(host,sessionId,command)).output,'catalog')
+})

@@ -349,6 +349,11 @@ export class NativeHostActions {
       case "agentCatalog":{
         if(!input.workspaceId)throw new LoopError("loop-host/invalid-request","Host Workspace is required")
         const domain = /^[a-z][a-z0-9-]*\./u.exec(input.prefix || "")?.[0].slice(0,-1) ?? ""
+        if (input.personalCatalog === true) {
+          if (!domain) throw new LoopError("loop-host/invalid-request","Supply a published action domain prefix ending in '.'. Discover domains with loop-proxy actions.",400)
+          const catalog = await this.backend.catalog(context,combined,domain,true)
+          return {actions:catalog.map(item=>item.id).filter(name=>name.startsWith(input.prefix)).sort()}
+        }
         const catalog = await this.backend.catalog(context,combined,domain)
         const actions = catalog.map(item=>item.id).filter(name=>!input.prefix || name.startsWith(input.prefix)).sort()
         if (!domain || input.prefix !== domain+"." || !input.prepareDelegation) return {actions}
@@ -372,7 +377,7 @@ export class NativeHostActions {
             return await this.backend.delegationPreview(context,input.name,undefined,combined)
           } catch (error) {
             if (error instanceof LoopError && error.status===404 && error.code==="unknown_action") {
-              throw new LoopError("unknown_action","Loop does not offer personal authorization for that action. Discover the published action first. For private messages use loop_direct_message with the exact Human member ID.",404)
+              throw new LoopError("unknown_action","Loop does not offer personal authorization for that action. Discover the published action first.",404)
             }
             throw error
           }
@@ -397,19 +402,9 @@ export class NativeHostActions {
             : await this.backend.invoke(context,input.name,input.arguments??{},combined)
         } catch (error) {
           if (!input.prepareDelegation || !(error instanceof LoopError) || error.outcomeUnknown) throw error
-          // A peer DM belongs to the sending identity. An empty Agent inbox says
-          // nothing about the user's conversation with the same colleague.
-          if (action === "agentAction" && input.name === "message.history" && /^dm:@[a-z0-9]{12}$/u.test(input.arguments?.target) &&
-              /dm does not exist/iu.test(error.message)) {
-            return this.backend.humanDM(context,input.name,{...input.arguments,asHuman:true},combined)
-          }
           const denied = permissionDenied(error)
           const missing = error.status===404 && error.code==="unknown_action"
           if (!denied && !missing) throw error
-          if (denied && action==="agentAction" && input.name==="message.history" && /^#[a-z0-9][a-z0-9-]*$/u.test(input.arguments?.target)) {
-            const {target,...page} = input.arguments
-            return this.backend.channelHistory(context,{...page,channelName:target},true,combined,error)
-          }
           try {
             const prepared = await this.backend.prepareDelegation(context,input.name,input.delegationArguments,combined)
             if (prepared.delegation?.action!==input.name) throw error
