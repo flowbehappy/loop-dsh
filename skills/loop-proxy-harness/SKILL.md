@@ -1,11 +1,15 @@
 ---
 name: loop-proxy-harness
-description: "Use Loop actions, resources and collaborators."
+description: "Discover and use Loop actions, resources and workspace collaborators through the connected assistant."
 ---
 
 # Loop in DSH
 
 Use the connected personal assistant to carry out and verify the requested work.
+Loop Agents and Humans are workspace identities, independent of local DSH
+subagents. Use the Loop directory for these identities; each directory covers
+its own system. Discover capabilities with `loop-proxy actions`, which also
+exposes Host collaboration tools without requiring a particular guide first.
 Use `resource.lookup` for the owner’s resource directory. Keep the requested name and type in the lookup.
 Omit filters for the whole directory. Each row’s `id` is the Loop identifier
 for that resource. Once the result answers the request, report it.

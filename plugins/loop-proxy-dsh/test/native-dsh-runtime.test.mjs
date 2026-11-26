@@ -212,7 +212,7 @@ export async function apply(ctx){
      const {runAudit}=await import(${JSON.stringify(new URL('./live-business-journeys.mjs',import.meta.url).href)})
      topicProvider=await live.liveTopicProvider()
      const control=new AbortController();ctx.effect(()=>()=>control.abort())
-     await runAudit({ctx,api,workspace,sessionId:result.session.sessionId,signal:control.signal,ownerUser:registered.user})
+     await runAudit({ctx,api,workspace,sessionId:result.session.sessionId,signal:control.signal,ownerUser:registered.user,localWorkspace,selectedModel:{provider:group.id,model:model.id}})
      control.abort();topicProvider=undefined;result.liveBusiness=true
    }
    if(topicFixture){

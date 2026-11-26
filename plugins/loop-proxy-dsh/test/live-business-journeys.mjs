@@ -5,8 +5,12 @@ import assert from 'node:assert/strict'
 const dir=process.env.LOOP_TEST_EVIDENCE_DIR
 if (!dir) throw new Error('An explicit evidence directory is required')
 const tip=text=>({type:'doc',content:[{type:'paragraph',content:[{type:'text',text}]}]})
-export async function runAudit({ctx,api,workspace,sessionId,signal,ownerUser}){
+export async function runAudit({ctx,api,workspace,sessionId,signal,ownerUser,localWorkspace,selectedModel}){
   const group=process.env.AUDIT_GROUP||'conversation', tag=randomUUID().slice(0,7), root='/api/v1/workspaces/'+workspace
+  if(group==='collaboration-discovery') {
+    const {runCollaborationDiscovery}=await import('./live-collaboration-discovery.mjs')
+    return runCollaborationDiscovery({ctx,api,workspace,localWorkspace,selectedModel,signal})
+  }
   const evidence={group,tag,sessionId,cases:[],offers:[],calls:[]}
   const verify=()=>{
     assert.ok(evidence.cases.length, 'No cases executed for '+group)
