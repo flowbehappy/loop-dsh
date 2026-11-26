@@ -1,0 +1,57 @@
+name: Release plugin
+on:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: write
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: plugins/loop-proxy-dsh/package-lock.json
+      - name: Check release metadata
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node --input-type=module <<'JS'
+          import {readFileSync, accessSync} from 'node:fs';
+          import assert from 'node:assert/strict';
+          const tag = process.env.RELEASE_TAG;
+          assert.match(tag, /^v\d+\.\d+\.\d+$/);
+          for (const path of ['plugins/loop-proxy-dsh/package.json', 'plugins/loop-dsh/package.json']) {
+            assert.equal('v' + JSON.parse(readFileSync(path)).version, tag);
+          }
+          accessSync(`docs/releases/${tag}.md`);
+          JS
+      - run: npm run bootstrap
+      - run: npm run check
+      - run: npm test
+      - run: npm run build:client
+      - name: Build installation archive
+        run: |
+          node plugins/loop-proxy-dsh/build-native.mjs "$RUNNER_TEMP/loop-release-package"
+          mkdir -p dist
+          npm pack "$RUNNER_TEMP/loop-release-package" --pack-destination dist --json > "$RUNNER_TEMP/loop-pack.json"
+          node --input-type=module <<'JS'
+          import {readFileSync, renameSync} from 'node:fs';
+          const [packed] = JSON.parse(readFileSync(process.env.RUNNER_TEMP + '/loop-pack.json'));
+          renameSync('dist/' + packed.filename, 'dist/loop-dsh.tgz');
+          JS
+          cd dist
+          sha256sum loop-dsh.tgz > loop-dsh.tgz.sha256
+      - name: Publish version and archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/loop-dsh.tgz dist/loop-dsh.tgz.sha256 --verify-tag --title "Loop for DSH $RELEASE_TAG" --notes-file "docs/releases/$RELEASE_TAG.md" --latest
