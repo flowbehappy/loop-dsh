@@ -55,6 +55,7 @@ export class LoopBackend {
   private collaborationWatches = new Map<string,{generation:string;watch:CollaborationWatch}>()
   private generations = new Map<string, string>()
   private connectionOperation?:ConnectionOperationLease
+  private accountWorkspaceName?: {generation: string; name: string | undefined; expiresAt: number}
   private accountDisconnects = new Map<string,Promise<void>>()
   private modelOperations = new Set<Promise<unknown>>()
   private loginQueue: Promise<unknown> = Promise.resolve()
@@ -205,14 +206,20 @@ export class LoopBackend {
   invoke(context: ActionContext, name: string, args: Record<string, unknown>, signal?: AbortSignal) {
     return this.action(context, signal, (client, combined) => client.invoke(name, args, combined), true)
   }
-  accountStatus(workspace: string, signal?: AbortSignal): Promise<any> {
+  accountStatus(workspace: string, signal?: AbortSignal, includeWorkspaceName = false): Promise<any> {
     const combined = this.active(signal)
     return this.track(async () => {
       const credential = await this.store(workspace).read()
       if (!credential) return {state: "signed_out"}
       if (credential.disconnect) return {state:"signing_out"}
       const tokens = new TokenManager(this.store(workspace), credential, {fetch:this.options.fetch})
-      try { return await new AccountService(new HostAPI(tokens, this.options.fetch), this.options.installation, this.options.pageOrigin).status(combined) }
+      const api = new HostAPI(tokens, this.options.fetch)
+      try {
+        const status = await new AccountService(api, this.options.installation, this.options.pageOrigin).status(combined)
+        if (!includeWorkspaceName || status.deviceOnly || !credential.host_page_proof) return status
+        const workspaceName = await this.readAccountWorkspaceName(api, credential, combined)
+        return workspaceName ? {...status, workspaceName} : status
+      }
       catch (error) {
         if (error instanceof LoopError && error.code === "loop-host/needs-auth") {
           const current=await this.store(workspace).read()
@@ -222,6 +229,27 @@ export class LoopBackend {
         throw error
       }
     })
+  }
+  private async readAccountWorkspaceName(api: HostAPI, credential: Credential, signal: AbortSignal): Promise<string | undefined> {
+    const cached = this.accountWorkspaceName
+    if (cached?.generation === credential.generation && cached.expiresAt > Date.now()) return cached.name
+    const pages = new PageService(api, this.options.installation, this.options.pageOrigin, this.options.fetch)
+    let name: string | undefined
+    try {
+      const workspaces = await pages.request("GET", "/api/v1/workspaces", undefined, AbortSignal.any([signal, AbortSignal.timeout(2000)]))
+      if (Array.isArray(workspaces)) {
+        const workspace = workspaces.find(item => item?.id === credential.workspace_id)
+        if (typeof workspace?.name === "string") name = workspace.name.trim() || undefined
+      }
+    } catch {
+      // Display metadata is optional. A page failure does not revoke the Host login.
+      requireActive(signal)
+    } finally {
+      pages.clear()
+    }
+    await api.tokens.credential(signal)
+    this.accountWorkspaceName = {generation: credential.generation, name, expiresAt: Date.now() + (name ? 300000 : 60000)}
+    return name
   }
   async preparePageConsent(workspace: string, expectedGrant: string, signal: AbortSignal) {
     const store = this.store(workspace)

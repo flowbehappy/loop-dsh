@@ -144,6 +144,24 @@ it('leaves workspace repair to the Host without a manual control', async () => {
   expect(screen.queryByText('Repair workspace connections')).toBeNull()
 })
 
+it.each([false, true])('offers sign-out without login while connected (device-only: %s)', async deviceOnly => {
+  const h = setup()
+  h.remote.globalServerStatus.mockResolvedValue(success({
+    serverUrl: 'https://loop.test', serverRevision: 'rev_a',
+    connection: {state: 'signed_in', accountName: 'Lin', workspaceName: 'Team Space', deviceOnly},
+  }) as never)
+  await open(h)
+  render(createElement(LoopLoginDialog, h.props as never))
+  expect(screen.queryByRole('button', {name: en['launcher.signIn']})).toBeNull()
+  expect(screen.queryByRole('tablist')).toBeNull()
+  expect(screen.getByRole('status').textContent).toContain('Lin · Team Space')
+  expect(Boolean(screen.queryByRole('button', {name: en['login.authorizePages']}))).toBe(deviceOnly)
+  fireEvent.submit(document.querySelector('form')!)
+  expect(h.start).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', {name: en['login.logout']}))
+  await waitFor(() => expect(h.remote.disconnectAccount).toHaveBeenCalledOnce())
+})
+
 it('pending sign-out blocks server changes and login, but exposes the existing confirmation action', async () => {
   const h = setup()
   await open(h)
@@ -151,8 +169,8 @@ it('pending sign-out blocks server changes and login, but exposes the existing c
   h.dialog.logout()
   await waitFor(() => expect(h.sync.store.getSnapshot().challenge).not.toBeNull())
   render(createElement(LoopLoginDialog, h.props as never))
-  expect((screen.getByRole('textbox') as HTMLInputElement).disabled).toBe(true)
-  expect((screen.getByRole('button', {name: en['launcher.signIn']}) as HTMLButtonElement).disabled).toBe(true)
+  expect(screen.queryByRole('textbox')).toBeNull()
+  expect(screen.queryByRole('button', {name: en['launcher.signIn']})).toBeNull()
   fireEvent.click(screen.getByRole('button', {name: en['settings.disconnectConfirm']}))
   expect(h.sync.store.getSnapshot().challengeOpened).toBe(true)
   await h.dialog.login()

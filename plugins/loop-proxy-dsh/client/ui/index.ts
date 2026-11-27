@@ -395,6 +395,7 @@ export function applyLoopUi(ctx: ClientContext, remote: LoopHostClient): void {
       signIn: signInLoop,
       contactUs: openHostFeedback,
       settingsAccess,
+      hooks: {globalPage: globalPage.store},
     }),
   }, LoopBottomMenu))
 
