@@ -49,13 +49,13 @@ async function open(h: ReturnType<typeof setup>) {
   await waitFor(() => expect(h.sync.store.getSnapshot().busy).toBeNull())
 }
 
-it('always shows the remembered server, status and both actions before any login', async () => {
+it('shows the remembered server and sign-in without a sign-out action before any login', async () => {
   const h = setup()
   await open(h)
   render(createElement(LoopLoginDialog, h.props as never))
   expect((screen.getByRole('textbox', {name: en['global.serverLabel']}) as HTMLInputElement).value).toBe('https://loop.test')
   expect(screen.getByRole('status').textContent).toContain(en['login.signedOut'])
-  expect((screen.getByRole('button', {name: en['login.logout']}) as HTMLButtonElement).disabled).toBe(true)
+  expect(screen.queryByRole('button', {name: en['login.logout']})).toBeNull()
   expect(h.openLoop).not.toHaveBeenCalled()
   expect(h.start).not.toHaveBeenCalled()
   expect(h.remote.configureGlobalServer).not.toHaveBeenCalled()

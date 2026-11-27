@@ -7400,7 +7400,7 @@ window.__ModuleLoader__.load({
         sync.disconnecting && sync.challenge !== null && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: loop_ui_default.hint, children: t("login.logoutPending") }),
         error !== null && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: error.code === "loop/no-models" ? loop_ui_default.warning : loop_ui_default.error, role: "alert", children: error.code === "loop/no-models" ? t("onboarding.noModels") : failureText(t, error) }),
         /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: loop_ui_default.loginActions, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives6.Button, { type: "button", variant: "outline", disabled: busy || loading || !canSignOut, onClick: dialog.logout, children: t(logoutLabel) }),
+          canSignOut && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives6.Button, { type: "button", variant: "outline", disabled: busy || loading, onClick: dialog.logout, children: t(logoutLabel) }),
           showLogin && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives6.Button, { type: "submit", variant: "primary", disabled: busy || loading || method2 === "token" && (authenticating || !token.trim()) || page.serverDraft.trim() === "", children: t(state.busy || page.serverBusy ? "global.serverSaving" : canRecover ? "onboarding.recoverLogin" : "launcher.signIn") }),
           signedIn && page.connection?.deviceOnly && !sync.disconnecting && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
             import_dsh_client_ui_primitives6.Button,

@@ -117,9 +117,9 @@ export function LoopLoginDialog({useLoginDialog, useGlobalPage, useProjectSync, 
         {error.code === 'loop/no-models' ? t('onboarding.noModels') : failureText(t, error)}
       </p>}
       <div className={css.loginActions}>
-        <Button type="button" variant="outline" disabled={busy || loading || !canSignOut} onClick={dialog.logout}>
+        {canSignOut && <Button type="button" variant="outline" disabled={busy || loading} onClick={dialog.logout}>
           {t(logoutLabel)}
-        </Button>
+        </Button>}
         {showLogin && <Button type="submit" variant="primary" disabled={busy || loading || (method === 'token' && (authenticating || !token.trim())) || page.serverDraft.trim() === ''}>
           {t(state.busy || page.serverBusy ? 'global.serverSaving'
             : canRecover ? 'onboarding.recoverLogin' : 'launcher.signIn')}
