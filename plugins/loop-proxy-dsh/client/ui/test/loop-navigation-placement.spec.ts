@@ -2,6 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -16,7 +17,8 @@ import {
 } from '../loop-navigation.ts'
 import { LoopMoreMenu } from '../loop-panels.tsx'
 import { LoopSettingsAccess } from '../settings-access.ts'
-import { LoopGlobalPageController } from '../global-page-controller.ts'
+import { INITIAL_GLOBAL_PAGE_STATE, LoopGlobalPageController } from '../global-page-controller.ts'
+import { createSnapshotStore } from '../store.ts'
 import type { LoopHostClient } from '../types.ts'
 
 function translate(key: keyof typeof en): string {
@@ -40,6 +42,7 @@ function hookFor<T>(source: HostObservable<T>) {
 function bottomMenuProps() {
   return {
     signIn: vi.fn(),
+    useGlobalPage: hookFor(observable(INITIAL_GLOBAL_PAGE_STATE)),
     contactUs: vi.fn(),
     openSettings: vi.fn(),
     settingsAccess: new LoopSettingsAccess(),
@@ -82,6 +85,30 @@ describe('Super Agent navigation placement', () => {
       if (other !== action) expect(props[other]).not.toHaveBeenCalled()
     }
     expect(screen.queryByRole('menu')).toBeNull()
+  })
+
+  it('shows the signed-in account and workspace in the same menu entry', () => {
+    const props = bottomMenuProps()
+    const page = createSnapshotStore(INITIAL_GLOBAL_PAGE_STATE)
+    function Launcher() {
+      return createElement(LoopBottomMenu, {...props, useGlobalPage: hookFor(page)} as never)
+    }
+    render(createElement(Launcher))
+    const trigger = screen.getByRole('button', {name: en['launcher.open']})
+    fireEvent.click(trigger)
+    expect(screen.getByRole('menuitem', {name: en['launcher.signIn']})).toBeTruthy()
+
+    act(() => page.set({...INITIAL_GLOBAL_PAGE_STATE, connection: {
+      state: 'signed_in', accountName: 'Lin', workspaceName: 'Team Space',
+    }}))
+    expect(screen.queryByRole('menuitem', {name: en['launcher.signIn']})).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', {name: 'Lin · Team Space'}))
+    expect(props.signIn).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('menu')).toBeNull()
+
+    act(() => page.set({...INITIAL_GLOBAL_PAGE_STATE, connection: {state: 'signed_out'}}))
+    fireEvent.click(trigger)
+    expect(screen.getByRole('menuitem', {name: en['launcher.signIn']})).toBeTruthy()
   })
 
   it('supports repeated opening, Escape and the collapsed sidebar', () => {

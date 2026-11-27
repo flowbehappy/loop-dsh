@@ -81,6 +81,45 @@ test('every action uses its own invocation endpoint and live server decision', a
   t.diagnostic(names.size+' action IDs exercised against allow and deny responses')
 })
 
+test('global account status includes the name of the authorized Loop workspace', async t => {
+  const {NativeHostActions} = await import('../backend/adapter.ts')
+  let workspaceReads = 0
+  let workspaceAvailable = true
+  const f = await fixture(t, async (req, res) => {
+    if (req.url.endsWith('/external-host/session')) {
+      let raw = ''; for await (const chunk of req) raw += chunk
+      const body = JSON.parse(raw)
+      return res.end(JSON.stringify({
+        principalId: 'principal', workspaceId: 'workspace', grantId: 'grant', accountName: 'Lin',
+        ...(body.resumeProof ? {pageLaunch: 'assertion', pageOrigin: f.base, expiresIn: 60} : {}),
+      }))
+    }
+    if (req.url.endsWith('/page-sessions')) {
+      res.setHeader('Set-Cookie', ['loop_external_page_session=access', 'loop_external_page_refresh=refresh'])
+      return res.writeHead(204).end()
+    }
+    if (req.url === '/api/v1/workspaces') {
+      workspaceReads++
+      if (!workspaceAvailable) return res.writeHead(503).end()
+      return res.end(JSON.stringify([{id: 'other', name: 'Other Space'}, {id: 'workspace', name: 'Team Space'}]))
+    }
+    res.writeHead(404).end()
+  })
+  await f.credentials.publish({...f.value, host_page_proof: 'proof'})
+  const adapter = new NativeHostActions({stateHome: f.root + '/host', serviceBaseUrl: f.base,
+    loopWorkspaceId: 'workspace', installationId: 'installation', pageOrigin: f.base}, {provider: f.provider})
+  t.after(() => adapter.dispose())
+  const expected = {state: 'signed_in', accountPrincipal: 'principal', workspaceId: 'workspace', grantId: 'grant', accountName: 'Lin'}
+  assert.deepEqual(await adapter.request('accountStatus', {}), {...expected, workspaceName: 'Team Space'})
+  assert.deepEqual(await adapter.request('accountStatus', {}), {...expected, workspaceName: 'Team Space'})
+  assert.equal(workspaceReads, 1, 'routine status polls reuse display metadata for the same login')
+
+  workspaceAvailable = false
+  await f.credentials.publish({...f.value, host_page_proof: 'another-proof'})
+  assert.deepEqual(await adapter.request('accountStatus', {}), expected)
+  assert.equal(workspaceReads, 2, 'a new login cannot inherit stale display metadata')
+})
+
 test('project binding uses server access decisions independent of role labels and service failures', async t => {
   const {SyncControl} = await import('../backend/sync-control.ts')
   const {HostAPI} = await import('../backend/host-api.ts')

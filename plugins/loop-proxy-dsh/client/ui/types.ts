@@ -120,7 +120,9 @@ export interface AccountLoginStatus {
   readonly state: 'signed_in' | 'signed_out' | 'needs_auth' | 'signing_out' | 'unavailable'
   readonly grantId?: string
   readonly accountPrincipal?: string
+  readonly accountName?: string
   readonly workspaceId?: string
+  readonly workspaceName?: string
 }
 
 export interface GlobalServerStatus {

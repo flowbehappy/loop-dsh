@@ -4219,6 +4219,9 @@ window.__ModuleLoader__.load({
       workspaceError: null,
       activePath: LOOP_DEFAULT_PATH
     });
+    function accountDisplayLabel(connection) {
+      return [connection?.accountName, connection?.workspaceName].flatMap((name2) => typeof name2 === "string" && name2.trim() ? [name2.trim()] : []).join(" \xB7 ");
+    }
     function startLoopGlobalPageRuntime(controller) {
       void controller.open();
       let stopped = false;
@@ -6707,10 +6710,13 @@ window.__ModuleLoader__.load({
       settingsShortcut,
       openSettings,
       settingsAccess,
+      useGlobalPage,
       t
     }) {
       const [open, setOpen] = (0, import_react3.useState)(false);
       const trigger = (0, import_react3.useRef)(null);
+      const connection = useGlobalPage((page) => page.connection);
+      const accountLabel = connection?.state === "signed_in" ? accountDisplayLabel(connection) || t("login.title") : connection?.state === "signing_out" ? t("login.signingOut") : t("launcher.signIn");
       (0, import_react3.useEffect)(() => {
         settingsAccess.setSettingsOpen(settingsOpen);
         if (settingsOpen) setOpen(false);
@@ -6761,7 +6767,7 @@ window.__ModuleLoader__.load({
               ...settingsShortcut === void 0 ? {} : { shortcut: settingsShortcut }
             },
             { id: "feedback", label: t("launcher.feedback"), icon: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.IconPaperPlaneOutlineMedium, { size: 16 }) },
-            { id: "signin", label: t("launcher.signIn"), icon: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.IconUserOutlineMedium, { size: 16 }) }
+            { id: "signin", label: accountLabel, icon: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.IconUserOutlineMedium, { size: 16 }) }
           ],
           onSelect: (id2) => {
             setOpen(false);
@@ -7284,6 +7290,8 @@ window.__ModuleLoader__.load({
       const loading = page.serverUrl === null && (page.screen === "idle" || page.screen === "loading");
       const busy = state.busy || page.serverBusy || sync.busy !== null;
       const signedIn = page.connection?.state === "signed_in";
+      const showLogin = !signedIn && !sync.disconnecting && page.connection?.state !== "signing_out";
+      const accountLabel = signedIn ? accountDisplayLabel(page.connection) : "";
       const canSignOut = signedIn || Boolean(page.connection?.accountPrincipal) || sync.disconnecting;
       const authenticating = ["waiting", "connecting", "recovering"].includes(connection.phase);
       const canRecover = connection.error?.code === "loop-host/credential-unavailable" && page.serverUrl !== null && normalizedLoopServerUrl(page.serverDraft)?.replace(/\/+$/u, "") === normalizedLoopServerUrl(page.serverUrl)?.replace(/\/+$/u, "");
@@ -7292,6 +7300,7 @@ window.__ModuleLoader__.load({
       const logoutLabel = sync.disconnecting ? sync.challenge !== null ? sync.challengeOpened ? "settings.disconnectCheck" : "settings.disconnectConfirm" : "settings.disconnectFinish" : "login.logout";
       return /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives6.Modal, { open: true, title: t("login.title"), closeLabel: t("dialog.close"), className: loop_ui_default.loginDialog, onClose: dialog.close, children: /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("form", { className: loop_ui_default.loginForm, noValidate: true, onSubmit: (event) => {
         event.preventDefault();
+        if (!showLogin) return;
         if (method2 === "token") {
           void dialog.login(token.trim());
           setToken("");
@@ -7301,71 +7310,73 @@ window.__ModuleLoader__.load({
       }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: loop_ui_default.loginIntro, children: [
           /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: loop_ui_default.loginBrand, children: /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(LoopBrandMark, { size: 32 }) }),
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { children: t("login.description") })
+          showLogin && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { children: t("login.description") })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { role: "tablist", "aria-label": t("login.method"), className: loop_ui_default.loginTabs, children: ["browser", "token"].map((item) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
-          "button",
-          {
-            role: "tab",
-            type: "button",
-            id: tokenId + item,
-            "aria-selected": method2 === item,
-            "aria-controls": tokenId + "panel",
-            disabled: busy || authenticating || sync.disconnecting,
-            onKeyDown: (event) => {
-              if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
-                event.preventDefault();
-                const next = event.key === "Home" ? "browser" : event.key === "End" ? "token" : item === "browser" ? "token" : "browser";
-                setToken("");
-                setMethod(next);
-                document.getElementById(tokenId + next)?.focus();
-              }
-            },
-            tabIndex: method2 === item ? 0 : -1,
-            onClick: () => {
-              setToken("");
-              setMethod(item);
-            },
-            children: item === "browser" ? t("login.browser") : "Access Token"
-          },
-          item
-        )) }),
-        /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { role: "tabpanel", id: tokenId + "panel", "aria-labelledby": tokenId + method2, className: loop_ui_default.loginField, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { htmlFor: serverId, children: t("global.serverLabel") }),
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
-            import_dsh_client_ui_primitives6.Input,
+        showLogin && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("div", { role: "tablist", "aria-label": t("login.method"), className: loop_ui_default.loginTabs, children: ["browser", "token"].map((item) => /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+            "button",
             {
-              id: serverId,
-              type: "url",
-              autoComplete: "url",
-              spellCheck: false,
-              value: page.serverDraft,
-              placeholder: t("global.serverPlaceholder"),
-              disabled: busy || loading || sync.disconnecting,
-              "aria-describedby": hintId,
-              "aria-invalid": page.serverError?.code === "loop/server-url-invalid",
-              onChange: (event) => {
+              role: "tab",
+              type: "button",
+              id: tokenId + item,
+              "aria-selected": method2 === item,
+              "aria-controls": tokenId + "panel",
+              disabled: busy || authenticating,
+              onKeyDown: (event) => {
+                if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+                  event.preventDefault();
+                  const next = event.key === "Home" ? "browser" : event.key === "End" ? "token" : item === "browser" ? "token" : "browser";
+                  setToken("");
+                  setMethod(next);
+                  document.getElementById(tokenId + next)?.focus();
+                }
+              },
+              tabIndex: method2 === item ? 0 : -1,
+              onClick: () => {
                 setToken("");
-                pageActions.changeServerUrl(event.currentTarget.value);
-              }
-            }
-          ),
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { id: hintId, className: loop_ui_default.hint, children: t("login.rememberServer") }),
-          method2 === "token" && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { htmlFor: tokenId, children: "Access Token" }),
+                setMethod(item);
+              },
+              children: item === "browser" ? t("login.browser") : "Access Token"
+            },
+            item
+          )) }),
+          /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { role: "tabpanel", id: tokenId + "panel", "aria-labelledby": tokenId + method2, className: loop_ui_default.loginField, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { htmlFor: serverId, children: t("global.serverLabel") }),
             /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
               import_dsh_client_ui_primitives6.Input,
               {
-                id: tokenId,
-                type: "password",
-                autoComplete: "off",
+                id: serverId,
+                type: "url",
+                autoComplete: "url",
                 spellCheck: false,
-                value: token,
-                disabled: busy || signedIn || authenticating || sync.disconnecting,
-                onChange: (event) => setToken(event.currentTarget.value)
+                value: page.serverDraft,
+                placeholder: t("global.serverPlaceholder"),
+                disabled: busy || loading,
+                "aria-describedby": hintId,
+                "aria-invalid": page.serverError?.code === "loop/server-url-invalid",
+                onChange: (event) => {
+                  setToken("");
+                  pageActions.changeServerUrl(event.currentTarget.value);
+                }
               }
             ),
-            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: loop_ui_default.hint, children: t("login.tokenHint") })
+            /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { id: hintId, className: loop_ui_default.hint, children: t("login.rememberServer") }),
+            method2 === "token" && /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(import_jsx_runtime7.Fragment, { children: [
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("label", { htmlFor: tokenId, children: "Access Token" }),
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+                import_dsh_client_ui_primitives6.Input,
+                {
+                  id: tokenId,
+                  type: "password",
+                  autoComplete: "off",
+                  spellCheck: false,
+                  value: token,
+                  disabled: busy || authenticating,
+                  onChange: (event) => setToken(event.currentTarget.value)
+                }
+              ),
+              /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: loop_ui_default.hint, children: t("login.tokenHint") })
+            ] })
           ] })
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)(
@@ -7379,6 +7390,7 @@ window.__ModuleLoader__.load({
               /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: loop_ui_default.loginStatusDot, "aria-hidden": "true" }),
               /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { children: [
                 /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("strong", { children: t(status) }),
+                accountLabel !== "" && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { children: accountLabel }),
                 signedIn && page.connection?.deviceOnly && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { children: t("login.personalPage") }),
                 signedIn && page.serverUrl !== null && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("span", { className: loop_ui_default.loginCurrentServer, children: page.serverUrl })
               ] })
@@ -7388,8 +7400,18 @@ window.__ModuleLoader__.load({
         sync.disconnecting && sync.challenge !== null && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: loop_ui_default.hint, children: t("login.logoutPending") }),
         error !== null && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: error.code === "loop/no-models" ? loop_ui_default.warning : loop_ui_default.error, role: "alert", children: error.code === "loop/no-models" ? t("onboarding.noModels") : failureText(t, error) }),
         /* @__PURE__ */ (0, import_jsx_runtime7.jsxs)("div", { className: loop_ui_default.loginActions, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives6.Button, { type: "button", variant: "outline", disabled: busy || loading || !canSignOut, onClick: dialog.logout, children: t(logoutLabel) }),
-          /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives6.Button, { type: "submit", variant: "primary", disabled: busy || loading || sync.disconnecting || method2 === "token" && (signedIn || authenticating || !token.trim()) || page.serverDraft.trim() === "", children: t(state.busy || page.serverBusy ? "global.serverSaving" : canRecover ? "onboarding.recoverLogin" : signedIn && page.connection?.deviceOnly && method2 === "browser" ? "login.authorizePages" : "launcher.signIn") })
+          canSignOut && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives6.Button, { type: "button", variant: "outline", disabled: busy || loading, onClick: dialog.logout, children: t(logoutLabel) }),
+          showLogin && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(import_dsh_client_ui_primitives6.Button, { type: "submit", variant: "primary", disabled: busy || loading || method2 === "token" && (authenticating || !token.trim()) || page.serverDraft.trim() === "", children: t(state.busy || page.serverBusy ? "global.serverSaving" : canRecover ? "onboarding.recoverLogin" : "launcher.signIn") }),
+          signedIn && page.connection?.deviceOnly && !sync.disconnecting && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)(
+            import_dsh_client_ui_primitives6.Button,
+            {
+              type: "button",
+              variant: "primary",
+              disabled: busy || authenticating,
+              onClick: dialog.authorizePages,
+              children: t("login.authorizePages")
+            }
+          )
         ] }),
         signedIn && !sync.disconnecting && /* @__PURE__ */ (0, import_jsx_runtime7.jsx)("p", { className: loop_ui_default.hint, children: t("login.logoutHint") })
       ] }) });
@@ -9501,7 +9523,8 @@ window.__ModuleLoader__.load({
         inject: () => ({
           signIn: signInLoop,
           contactUs: openHostFeedback,
-          settingsAccess
+          settingsAccess,
+          hooks: { globalPage: globalPage.store }
         })
       }, LoopBottomMenu));
       if (!("dshDesktop" in globalThis)) {

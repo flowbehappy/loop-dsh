@@ -47,11 +47,12 @@ test('the native sidebar keeps Tasks and exposes other Loop modules through More
   assert.match(clientEntry, /inject: \(\): LoopMoreMenuInjected => \(\{openModule: selectLoopModule\}\)/u)
 })
 
-test('the bottom menu keeps settings, feedback and Loop sign-in only', () => {
+test('the bottom menu keeps settings, feedback and the Loop account entry only', () => {
   assert.doesNotMatch(menu, /module\.tasks|module\.capabilities|module\.contacts|module\.workflows/u)
   assert.match(menu, /launcher\.feedback/u)
   assert.match(menu, /launcher\.signIn/u)
-  assert.doesNotMatch(menu, /useModels|useProjectSync|useGlobalPage/u)
+  assert.match(menu, /useGlobalPage\(page => page\.connection\)/u)
+  assert.doesNotMatch(menu, /useModels|useProjectSync/u)
   assert.match(menu, /launcher\.settings/u)
 })
 

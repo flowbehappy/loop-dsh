@@ -275,7 +275,7 @@ export class NativeHostActions {
       const connected=await this.connect(combined)
       if(connected.state!=="connected")return connected
     }
-    if(action==="accountStatus")return this.workspace?this.backend.accountStatus(this.workspace,combined):{state:"signed_out"}
+    if(action==="accountStatus")return this.workspace?this.backend.accountStatus(this.workspace,combined,true):{state:"signed_out"}
     if(action==="modelStatus"){
       const status=await this.connectionIdentity()
       if(status.state!=="signed_in")return {state:"needs_auth",connections:[],...(this.accountPrincipal?{accountPrincipal:this.accountPrincipal}:{})}

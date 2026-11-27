@@ -1,4 +1,4 @@
-/** Native-shaped settings launcher, with Loop owning only the sign-in action. */
+/** Native-shaped settings launcher, with Loop owning the account entry. */
 
 import {useEffect, useRef, useState, type ReactNode} from 'react'
 import {
@@ -8,8 +8,9 @@ import {
   IconUserOutlineMedium,
   Menu,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type {InjectFace, PropsLocale, PropsRuntime} from '@deepseek-ai/dsh-client-ui-slots'
+import type {HostObservable, InjectFace, PropsLocale, PropsRuntime} from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import {accountDisplayLabel, type GlobalPageState} from './global-page-controller.ts'
 import type {NS} from './locales.ts'
 import type {SettingsAccess} from './settings-access.ts'
 import css from './loop-ui.module.css'
@@ -18,6 +19,7 @@ export interface LoopBottomMenuInjected {
   readonly signIn: () => void
   readonly contactUs: () => void
   readonly settingsAccess: SettingsAccess
+  readonly hooks: {readonly globalPage: HostObservable<GlobalPageState>}
 }
 
 export type LoopBottomMenuProps =
@@ -34,10 +36,14 @@ export function LoopBottomMenu({
   settingsShortcut,
   openSettings,
   settingsAccess,
+  useGlobalPage,
   t,
 }: LoopBottomMenuProps): ReactNode {
   const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
+  const connection = useGlobalPage(page => page.connection)
+  const accountLabel = connection?.state === 'signed_in' ? accountDisplayLabel(connection) || t('login.title')
+    : connection?.state === 'signing_out' ? t('login.signingOut') : t('launcher.signIn')
 
   useEffect(() => {
     settingsAccess.setSettingsOpen(settingsOpen)
@@ -79,7 +85,7 @@ export function LoopBottomMenu({
         {id: 'settings', label: t('launcher.settings'), icon: <IconSettingsOutlineMedium size={16} />,
           ...(settingsShortcut === undefined ? {} : {shortcut: settingsShortcut})},
         {id: 'feedback', label: t('launcher.feedback'), icon: <IconPaperPlaneOutlineMedium size={16} />},
-        {id: 'signin', label: t('launcher.signIn'), icon: <IconUserOutlineMedium size={16} />},
+        {id: 'signin', label: accountLabel, icon: <IconUserOutlineMedium size={16} />},
       ]}
       onSelect={id => {
         setOpen(false)

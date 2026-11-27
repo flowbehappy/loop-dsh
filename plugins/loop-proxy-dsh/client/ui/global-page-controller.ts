@@ -72,6 +72,12 @@ export const INITIAL_GLOBAL_PAGE_STATE: GlobalPageState = Object.freeze({
   activePath: LOOP_DEFAULT_PATH,
 })
 
+export function accountDisplayLabel(connection: AccountLoginStatus | undefined): string {
+  return [connection?.accountName, connection?.workspaceName]
+    .flatMap(name => typeof name === 'string' && name.trim() ? [name.trim()] : [])
+    .join(' · ')
+}
+
 export interface GlobalProjectTarget {
   readonly projectId: string
   readonly loopWorkspaceId: string
