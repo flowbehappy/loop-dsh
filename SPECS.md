@@ -1,6 +1,6 @@
-# Loop-DSH 规范
+# Loop-DSH Specifications
 
-- [宿主架构](./specs/architecture/README.md)
-- [客户端产品](./specs/product/README.md)
+- [Host Runtime & Daemon Bridge Architecture](./specs/architecture/README.md)
+- [Product Flow & Session Sync](./specs/product/README.md)
 
-Loop 服务端协议、身份、授权与业务状态以 Loop 仓库 的规范为准。
+Authoritative server, OAuth bootstrap, and daemon gateway specifications live in the primary Loop repository (`specs/auth/external-oauth-bootstrap.md` and `specs/agent/deepseek-harness-runtime.md`).

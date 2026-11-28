@@ -1,11 +1,8 @@
 node_modules/
-__pycache__/
-.data/
-.p0-tmp/
 dist/
-coverage/
-*.log
+plugins/*/node_modules/
+plugins/*/dist/
+*.tgz
+*.sha256
 .DS_Store
-.env
-.env.*
-!.env.example
+plugins/*/dist-test-build/
