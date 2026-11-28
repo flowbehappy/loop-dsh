@@ -1,9 +1,8 @@
 - insert:
-    - id: loop-dsh-sync
-      name: '@pingkai/dsh-loop-sync'
-      inject: [loopNativeSyncWriterFactory]
+    - id: loop-dsh
+      name: '@pingkai/loop-dsh'
       config:
-        workspaceRoot: !!js process.env.LOOP_DSH_SYNC_WORKSPACE_ROOT
-        profile: !!js process.env.LOOP_DSH_HOST_SYNC_PROFILE ?? 'dsh-loop'
-        hostSyncHome: !!js process.env.LOOP_DSH_HOST_SYNC_HOME
-        clientSessionLabel: DeepSeek Harness
+        stateDir: !!js "process.env.LOOP_DSH_STATE_DIR || ''"
+        loopServerUrl: !!js "process.env.LOOP_SERVER_URL || ''"
+        loopConfigDir: !!js "process.env.LOOP_CONFIG_DIR || ''"
+        loopBinaryPath: !!js "process.env.LOOP_BINARY_PATH || ''"

@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: plugins/loop-proxy-dsh/package-lock.json
+          cache-dependency-path: plugins/loop-dsh/package-lock.json
       - name: Check release metadata
         env:
           RELEASE_TAG: ${{ github.ref_name }}
@@ -28,23 +28,20 @@ jobs:
           import assert from 'node:assert/strict';
           const tag = process.env.RELEASE_TAG;
           assert.match(tag, /^v\d+\.\d+\.\d+$/);
-          for (const path of ['plugins/loop-proxy-dsh/package.json', 'plugins/loop-dsh/package.json']) {
-            assert.equal('v' + JSON.parse(readFileSync(path)).version, tag);
-          }
+          assert.equal('v' + JSON.parse(readFileSync('plugins/loop-dsh/package.json', 'utf8')).version, tag);
           accessSync(`docs/releases/${tag}.md`);
           JS
       - run: npm run bootstrap
       - run: npm run check
       - run: npm test
-      - run: npm run build:client
       - name: Build installation archive
         run: |
-          node plugins/loop-proxy-dsh/build-native.mjs "$RUNNER_TEMP/loop-release-package"
+          node plugins/loop-dsh/scripts/build-release.mjs "$RUNNER_TEMP/loop-release-package"
           mkdir -p dist
           npm pack "$RUNNER_TEMP/loop-release-package" --pack-destination dist --json > "$RUNNER_TEMP/loop-pack.json"
           node --input-type=module <<'JS'
           import {readFileSync, renameSync} from 'node:fs';
-          const [packed] = JSON.parse(readFileSync(process.env.RUNNER_TEMP + '/loop-pack.json'));
+          const [packed] = JSON.parse(readFileSync(process.env.RUNNER_TEMP + '/loop-pack.json', 'utf8'));
           renameSync('dist/' + packed.filename, 'dist/loop-dsh.tgz');
           JS
           cd dist

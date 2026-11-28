@@ -1,32 +1,53 @@
 {
-  "name": "@pingkai/dsh-loop-sync",
-  "version": "0.2.9",
-  "description": "Opt-in visible Human/Agent conversation sync from official DeepSeek Harness into Loop",
+  "name": "@pingkai/loop-dsh",
+  "version": "2.0.0",
+  "description": "Unified DeepSeek Harness host runtime bridge and OAuth bootstrap plugin for Loop",
   "type": "module",
-  "main": "lib/index.js",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "loop-dsh": "./dist/cli.js"
+  },
   "exports": {
-    ".": "./lib/index.js",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "default": "./dist/cli.js"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
-    "lib/index.js",
-    "lib/gate.js",
-    "lib/label.js",
-    "lib/map.js",
-    "lib/scope.js",
-    "lib/config.js",
+    "dist",
     "cordis.patch.yml",
-    "README.md"
+    "skills/loop-dsh/SKILL.md",
+    "README.md",
+    "LICENSE"
   ],
   "license": "Apache-2.0",
   "engines": {
-    "node": "^22.19.0 || >=24.0.0"
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.2.2-rc.1"
+  },
+  "dependencies": {
+    "ws": "8.22.2"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "~4.0.5",
-    "@deepseek-ai/dsh-session-telemetry": ">=0.2.2-rc.1",
-    "@deepseek-ai/schemastery": "~3.18.5"
+    "@deepseek-ai/cordis": ">=4.0.5 <5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@types/node": "^24.19.2",
+    "@types/ws": "8.18.1",
+    "typescript": "5.9.3"
   },
   "dsh": {
     "bundle": {
@@ -34,7 +55,9 @@
     }
   },
   "scripts": {
-    "test": "node --test test/*.test.js",
-    "check": "node --check lib/index.js && node --check lib/gate.js && node --check lib/map.js && node --check lib/scope.js && node --check lib/config.js"
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit && npm run build",
+    "pretest": "npm run build",
+    "test": "tsc -p tsconfig.test.json && node --test --test-concurrency=1 dist-test-build/test/*.test.js"
   }
 }

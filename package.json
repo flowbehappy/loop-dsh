@@ -1,5 +1,5 @@
 {
-  "name": "loop-dsh",
+  "name": "loop-dsh-workspace",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -7,9 +7,10 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "scripts": {
-    "bootstrap": "npm ci --prefix plugins/loop-proxy-dsh",
-    "test": "npm --prefix plugins/loop-proxy-dsh test && npm --prefix plugins/loop-dsh test",
-    "check": "npm --prefix plugins/loop-proxy-dsh run check && npm --prefix plugins/loop-dsh run check",
-    "build:client": "npm --prefix plugins/loop-proxy-dsh run build:client"
+    "bootstrap": "npm ci --prefix plugins/loop-dsh",
+    "build": "npm --prefix plugins/loop-dsh run build",
+    "check": "npm --prefix plugins/loop-dsh run check",
+    "test": "npm --prefix plugins/loop-dsh test",
+    "build:release": "node plugins/loop-dsh/scripts/build-release.mjs"
   }
 }
